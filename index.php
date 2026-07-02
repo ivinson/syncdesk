@@ -375,7 +375,7 @@ if ($is_admin) {
         <!-- Welcome Banner -->
         <div class="mb-4">
             <h2 class="fw-bold mb-1">Olá, <?= explode(' ', $full_name)[0] ?> 👋</h2>
-            <p class="text-muted">Bem-vindo ao painel tático do SyncDesk. Veja um resumo operacional.</p>
+            <p class="text-muted">Bem-vindo ao painel tático do SyncDesk. Veja um resumo operacional</p>
         </div>
 
         <!-- 4 KPI Metrics Row -->
