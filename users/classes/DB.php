@@ -1,0 +1,982 @@
+<?php
+/*
+UserSpice
+An Open Source PHP User Management System
+by the UserSpice Team at http://UserSpice.com
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+//new debugging feature helps track down stray queries. 
+//either on your page or at the top of users/init.php set the following variables
+//$database_logging = true;
+//$database_logging_tables_only = ["users"]; //array of tables that you want to limit your debugging to.  
+//runs a stack trace on all insert/update queries for the specified tables
+//logs to the logs table with the logtype of DATABASE_INSERT or DATABASE_UPDATE
+class DB
+{
+	private static $_instance        = null;
+	private ?PDO 	$_pdo 			 = null;
+	private         $_query;
+	private bool    $_error          = false;
+	private array   $_errorInfo      = ['00000', null, null];
+	private array   $_results        = [];
+	private array   $_resultsArray   = [];
+	private int     $_count          = 0;
+	private int     $_lastId         = 0;
+	private int     $_queryCount     = 0;
+
+	private bool  $database_logging = false;
+	private array $database_logging_tables_only = [];
+
+	/* Cached connection info for reconnect()  */
+	private string  $dsn;
+	private ?string $user;
+	private ?string $pass;
+	private array   $opts;
+
+	private function __construct($config = [])
+	{
+		// Build PDO options once
+		
+		// Prefer the PHP 8.4+ namespaced constant; fall back to the classic
+		// PDO::MYSQL_ATTR_INIT_COMMAND. The final 1002 literal guards against the
+		// case where neither constant is defined (pdo_mysql extension not loaded)
+		// so we fail later at connect time with a clear "could not find driver"
+		// rather than a fatal "undefined constant" here.
+		$initCommand = defined('Pdo\Mysql::ATTR_INIT_COMMAND')
+			? \Pdo\Mysql::ATTR_INIT_COMMAND
+			: (defined('PDO::MYSQL_ATTR_INIT_COMMAND') ? \PDO::MYSQL_ATTR_INIT_COMMAND : 1002);
+
+		$this->opts = Config::get('mysql/options') ?: [
+			$initCommand => "SET SESSION sql_mode = ''",
+		];
+		$this->opts[PDO::ATTR_ERRMODE] = PDO::ERRMODE_EXCEPTION;   // always throw exceptions
+
+		$charset = $this->getValidatedCharset();
+
+		/* Decide which credential/DSN set to use — identical logic to the
+		   original code, but we ALSO cache the outcome so reconnect() is
+		   guaranteed to hit the same server / database.  */
+		if ($config === []) {
+			// default db from init.php
+			$this->dsn  = 'mysql:host=' . Config::get('mysql/host') .
+				';dbname='    . Config::get('mysql/db') .
+				';charset='  . $charset;
+			$this->user = Config::get('mysql/username');
+			$this->pass = Config::get('mysql/password');
+		} elseif (!is_array($config) || count($config) === 1) {
+			// DB::getDB('other_db')  or  DB::getDB(['other_db'])
+			if (is_array($config)) $config = $config[0];
+			$this->dsn  = 'mysql:host=' . Config::get('mysql/host') .
+				';dbname='    . $config .
+				';charset='  . $charset;
+			$this->user = Config::get('mysql/username');
+			$this->pass = Config::get('mysql/password');
+		} elseif (in_array('init', $config, true)) {
+			//this allows you to get another db from your init file that is added to your init.php config
+			//array and call it like this 
+			// $db2 = DB::getDB(['mysql2','init']);
+			//your init file can have as many of these sets of db creds as you would like added like this
+			// 'mysql'      => array(
+			// 'host'         => '127.0.0.1',
+			// 'username'     => 'root',
+			// 'password'     => '',
+			// 'db'           => '513',
+			// ),
+			// 'mysql2'      => array(
+			// 'host'         => 'localhost',
+			// 'username'     => 'root',
+			// 'password'     => '',
+			// 'db'           => 'dbname',
+			// ),
+			//be sure to give each one a unique name like mysql2, mysql3
+
+			$group      = $config[0];
+			$this->dsn  = 'mysql:host=' . Config::get("$group/host") .
+				';dbname='    . Config::get("$group/db") .
+				';charset='  . $charset;
+			$this->user = Config::get("$group/username");
+			$this->pass = Config::get("$group/password");
+		} else {
+			// DB::getDB(['host','db','user','pass'])
+			$this->dsn  = 'mysql:host=' . $config[0] .
+				';dbname='    . $config[1] .
+				';charset='  . $charset;
+			$this->user = $config[2];
+			$this->pass = $config[3];
+		}
+
+		try {
+			$this->_pdo = new PDO($this->dsn, $this->user, $this->pass, $this->opts);
+			if (Config::get('mysql/force_utc_mysql') === true) {
+				$this->_pdo->exec("SET time_zone = '+00:00'");
+			}
+			$this->applyCharsetAndCollation();
+		} catch (PDOException $e) {
+			//for debugging comment the line in below
+			//die($e->getMessage());
+			die("Could not connect to database.  Please check your configuration.");
+		}
+	}
+
+
+	public static function getInstance()
+	{
+		if (!isset(self::$_instance)) {
+			self::$_instance = new DB();
+		}
+		return self::$_instance;
+	}
+
+	public static function getDB($config)
+	{
+		self::$_instance = new DB($config);
+		return self::$_instance;
+	}
+
+
+	public function beginTransaction()
+	{
+		return $this->_pdo->beginTransaction();
+	}
+
+	public function commit()
+	{
+		return $this->_pdo->commit();
+	}
+
+	public function rollBack()
+	{
+		return $this->_pdo->rollBack();
+	}
+
+	public function inTransaction()
+	{
+		return $this->_pdo->inTransaction();
+	}
+
+	public function query($sql, $params = array())
+	{
+		#echo "DEBUG: query(sql=$sql, params=".print_r($params,true).")<br />\n";
+		$this->_queryCount++;
+		$this->_error = false;
+		$this->_errorInfo = array(0, null, null);
+		$this->_resultsArray = [];
+		$this->_count = 0;
+		$this->_lastId = 0;
+		if ($this->_query = $this->_pdo->prepare($sql)) {
+			$x = 1;
+			if (count($params)) {
+				foreach ($params as $param) {
+					$this->_query->bindValue($x, $param);
+					$x++;
+				}
+			}
+
+			try {
+				if ($this->_query->execute()) {
+					if ($this->_query->columnCount() > 0) {
+						$this->_results = $this->_query->fetchALL(PDO::FETCH_OBJ);
+						$this->_resultsArray = json_decode(json_encode($this->_results), true) ?: [];
+					} else {
+						// Ensure _resultsArray is empty array for non-SELECT queries
+						$this->_resultsArray = [];
+					}
+					$this->_count = $this->_query->rowCount();
+					$this->_lastId = (int)$this->_pdo->lastInsertId();
+				} else {
+					throw new Exception("db error");
+				}
+			} catch (Exception $e) {
+				$this->_error = true;
+				$this->_results = [];
+				$this->_errorInfo = $this->_query->errorInfo();
+			}
+		}
+
+		return $this;
+	}
+
+	public function findAll($table)
+	{
+		return $this->action('SELECT *', $table);
+	}
+
+	public function findById($id, $table)
+	{
+		return $this->action('SELECT *', $table, array('id', '=', $id));
+	}
+
+	public function action($action, $table, $where = array())
+	{
+		$table = $this->_sanitizeTableName($table);
+		$sql    = "{$action} FROM {$table}";
+		$values = array();
+		$is_ok  = true;
+
+		if ($where_text = $this->_calcWhere($where, $values, "and", $is_ok))
+			$sql .= " WHERE $where_text";
+
+		if ($is_ok)
+			if (!$this->query($sql, $values)->error())
+				return $this;
+
+		return false;
+	}
+
+	private function _calcWhere($w, &$vals, $comboparg = 'and', &$is_ok = NULL)
+	{
+		#echo "DEBUG: Entering _calcwhere(w=".print_r($w,true).",...)<br />\n";
+		if (is_array($w)) {
+			#echo "DEBUG: is_array - check<br />\n";
+			$comb_ops   = ['and', 'or', 'and not', 'or not'];
+			$valid_ops  = ['=', '<', '>', '<=', '>=', '<>', '!=', 'LIKE', 'NOT LIKE', 'ALIKE', 'NOT ALIKE', 'REGEXP', 'NOT REGEXP'];
+			$two_args   = ['IS NULL', 'IS NOT NULL'];
+			$four_args  = ['BETWEEN', 'NOT BETWEEN'];
+			$arr_arg    = ['IN', 'NOT IN'];
+			$nested_arg = ['ANY', 'ALL', 'SOME'];
+			$nested     = ['EXISTS', 'NOT EXISTS'];
+			$nestedIN   = ['IN SELECT', 'NOT IN SELECT'];
+			$wcount     = count($w);
+
+			if ($wcount == 0)
+				return "";
+
+			# believe it or not, this appears to be the fastest way to check
+			# sequential vs associative. Particularly with our expected short
+			# arrays it shouldn't impact memory usage
+			# https://gist.github.com/Thinkscape/1965669
+			if (array_values($w) === $w) { // sequential array
+				#echo "DEBUG: Sequential array - check!<br />\n";
+				if (in_array(strtolower($w[0]), $comb_ops)) {
+					#echo "DEBUG: w=".print_r($w,true)."<br />\n";
+					$sql = '';
+					$combop = '';
+					// Normalize combop to uppercase for consistent SQL output
+					$normalizedCombop = strtoupper(trim((string)$w[0]));
+					for ($i = 1; $i < $wcount; $i++) {
+						$sql .= ' ' . $combop . ' ' . $this->_calcWhere($w[$i], $vals, "and", $is_ok);
+						$combop = $normalizedCombop;
+					}
+					return '(' . $sql . ')';
+				} elseif ($wcount == 2) {
+					// Normalize operator to uppercase for comparison
+					$op = strtoupper(trim((string)$w[1]));
+					if (in_array($op, $two_args, true)) {
+						return $this->_sanitizeColumnName($w[0]) . " {$op}";
+					} else {
+						$is_ok = false;
+						throw new InvalidArgumentException("Invalid WHERE clause: unrecognized 2-arg operator '{$w[1]}'.");
+					}
+				} elseif ($wcount == 3) {
+					// First check if this is EXISTS/NOT EXISTS format: ['EXISTS', 'table', 'column']
+					// where operator is in $w[0], not $w[1]
+					$op0 = strtoupper(trim((string)$w[0]));
+					if (in_array($op0, $nested, true)) {
+						return $op0 . $this->get_subquery_sql($w[2], $w[1], [], $vals, $is_ok);
+					}
+					// Normal 3-arg: ['column', 'operator', 'value']
+					$op = strtoupper(trim((string)$w[1]));
+					if (in_array($op, $valid_ops, true)) {
+						#echo "DEBUG: normal condition w=".print_r($w,true)."<br />\n";
+						$vals[] = $w[2];
+						return $this->_sanitizeColumnName($w[0]) . " {$op} ?";
+					} elseif (in_array($op, $arr_arg, true) && is_array($w[2])) {
+						// Handle empty arrays: IN [] = always false, NOT IN [] = always true
+						if (count($w[2]) === 0) {
+							return ($op === 'IN') ? '0=1' : '1=1';
+						}
+						$vals = array_merge($vals, $w[2]);
+						return $this->_sanitizeColumnName($w[0]) . " {$op} (" . substr(str_repeat(",?", count($w[2])), 1) . ")";
+					} else {
+						$is_ok = false;
+						throw new InvalidArgumentException("Invalid WHERE clause: unrecognized 3-arg operator '{$w[1]}'.");
+					}
+				} elseif ($wcount == 4) {
+					$op = strtoupper(trim((string)$w[1]));
+					if (in_array($op, $four_args, true)) {
+						$vals[] = $w[2];
+						$vals[] = $w[3];
+						return $this->_sanitizeColumnName($w[0]) . " {$op} ? AND ?";
+					} elseif (in_array($op, $nestedIN, true)) {
+						return $this->_sanitizeColumnName($w[0]) . " " . substr($op, 0, -7) . $this->get_subquery_sql($w[3], $w[2], [], $vals, $is_ok);
+					} else {
+						// Check if first element is EXISTS/NOT EXISTS with where clause
+						$op0 = strtoupper(trim((string)$w[0]));
+						if (in_array($op0, $nested, true) && is_array($w[3])) {
+							return $op0 . $this->get_subquery_sql($w[2], $w[1], $w[3], $vals, $is_ok);
+						}
+						$is_ok = false;
+						throw new InvalidArgumentException("Invalid WHERE clause: unrecognized 4-arg operator '{$w[1]}'.");
+					}
+				} elseif ($wcount == 5 || $wcount == 6) {
+					$op1 = strtoupper(trim((string)$w[1]));
+					$op2 = strtoupper(trim((string)$w[2]));
+					// Fix precedence: ($wcount == 5) || (($wcount == 6) && is_array($w[5]))
+					if (($wcount == 5 || is_array($w[5])) && in_array($op1, $valid_ops, true) && in_array($op2, $nested_arg, true)) {
+						$whereArg = $wcount == 6 ? $w[5] : [];
+						return $this->_sanitizeColumnName($w[0]) . " {$op1} {$op2}" . $this->get_subquery_sql($w[4], $w[3], $whereArg, $vals, $is_ok);
+					} elseif (($wcount == 5 && is_array($w[4])) && in_array($op1, $nestedIN, true)) {
+						return $this->_sanitizeColumnName($w[0]) . " " . substr($op1, 0, -7) . $this->get_subquery_sql($w[3], $w[2], $w[4], $vals, $is_ok);
+					} else {
+						$is_ok = false;
+						throw new InvalidArgumentException("Invalid WHERE clause: unrecognized 5/6-arg structure.");
+					}
+				} else {
+					$is_ok = false;
+					throw new InvalidArgumentException("Invalid WHERE clause: unrecognized format with {$wcount} elements.");
+				}
+			} else { // associative array ['field' => 'value']
+				#echo "DEBUG: Associative<br />\n";
+				$sql = '';
+				$combop = '';
+				// Normalize comboparg to uppercase for consistent SQL output
+				$normalizedComboparg = strtoupper(trim((string)$comboparg));
+				foreach ($w as $k => $v) {
+					if (in_array(strtolower($k), $comb_ops)) {
+						#echo "DEBUG: A<br />\n";
+						#echo "A: k=$k, v=".print_r($v,true)."<br />\n";
+						// Normalize the nested combop key to uppercase
+						$sql .= $combop . ' (' . $this->_calcWhere($v, $vals, strtoupper(trim((string)$k)), $is_ok) . ') ';
+						$combop = $normalizedComboparg;
+					} else {
+						#echo "DEBUG: B<br />\n";
+						#echo "B: k=$k, v=".print_r($v,true)."<br />\n";
+						$vals[] = $v;
+						$k = trim($k);
+						// Handle 'field op' shortcut - only allow valid SQL comparison operators
+						// Column names must start with letter or underscore, not digit
+						if (preg_match('/^([A-Za-z_][A-Za-z0-9_]*)\s*(=|!=|<>|<=|>=|<|>)$/', $k, $matches)) {
+							$sql .= $combop . ' ' . $this->_sanitizeColumnName($matches[1]) . ' ' . $matches[2] . ' ? ';
+						} else {
+							// Plain field name - defaults to = operator
+							$sql .= $combop . ' ' . $this->_sanitizeColumnName($k) . ' = ? ';
+						}
+						$combop = $normalizedComboparg;
+					}
+				}
+				return ' (' . $sql . ') ';
+			}
+		} else {
+			$is_ok = false;
+			throw new InvalidArgumentException("Invalid WHERE clause: expected array, got " . gettype($w) . ".");
+		}
+	}
+
+	public function get($table, $where)
+	{
+		return $this->action('SELECT *', $table, $where);
+	}
+
+	public function delete($table, $where)
+	{
+		if (is_int($where)) {
+			return $this->deleteById($table, $where);
+		}
+		return empty($where) ? false : $this->action('DELETE', $table, $where);
+	}
+
+	public function deleteById($table, $id)
+	{
+		return $this->action('DELETE', $table, array('id', '=', $id));
+	}
+
+	public function insert($table, $fields = [], $update = false)
+	{
+		$table = $this->_sanitizeTableName($table);
+		$keys = array_keys($fields);
+		$values = [];
+		$records = 0;
+
+		foreach ($fields as $field) {
+			$count = is_array($field) ? count($field) : 1;
+
+			if (!isset($first_time) || $count < $records) {
+				$first_time = true;
+				$records = $count;
+			}
+		}
+
+		for ($i = 0; $i < $records; $i++)
+			foreach ($fields as $field)
+				$values[] = is_array($field) ? $field[$i] : $field;
+
+		// Build column list by sanitizing each key
+		$colList = implode(',', array_map([$this, '_sanitizeColumnName'], $keys));
+		$col = ",(" . substr(str_repeat(",?", count($fields)), 1) . ")";
+		$sql = "INSERT INTO {$table} ({$colList}) VALUES " . substr(str_repeat($col, $records), 1);
+
+		if ($update) {
+			$sql .= " ON DUPLICATE KEY UPDATE";
+
+			// Sanitize each key fresh for both assignment and VALUES()
+			// Produces: `col` = VALUES(`col`) which is valid MySQL syntax
+			foreach ($keys as $key) {
+				if ($key !== "id") {
+					$sanKey = $this->_sanitizeColumnName($key);
+					$sql .= " {$sanKey} = VALUES({$sanKey}),";
+				}
+			}
+
+			if (!empty($keys))
+				$sql = substr($sql, 0, -1);
+		}
+		$result = !$this->query($sql, $values)->error();
+
+		if ($result) {
+			$this->logQuery('INSERT', $table, $fields);
+		}
+
+		return $result;
+	}
+
+	public function update($table, $id, $fields)
+	{
+		// Cannot update with no fields - would produce invalid SQL
+		if (empty($fields)) {
+			return false;
+		}
+
+		$table = $this->_sanitizeTableName($table);
+		// Sanitize all column keys to prevent identifier injection
+		$keys = array_keys($fields);
+		$sanitizedKeys = array_map([$this, '_sanitizeColumnName'], $keys);
+		// Build SET clause: `col1` = ? , `col2` = ? , ...
+		$setClause = implode(' = ? , ', $sanitizedKeys) . ' = ? ';
+		$sql = "UPDATE {$table} SET {$setClause}";
+		$is_ok = true;
+
+		if (!is_array($id)) {
+			$sql     .= "WHERE id = ?";
+			$fields[] = $id;
+		} else {
+			if (empty($id))
+				return false;
+
+			if ($where_text = $this->_calcWhere($id, $fields, "and", $is_ok))
+				$sql .= "WHERE $where_text";
+		}
+
+		if ($is_ok) {
+			if (!$this->query($sql, $fields)->error()) {
+				$this->logQuery('UPDATE', $table, array_merge($fields, ['id' => $id]));
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	public function results($assoc = false)
+	{
+		if ($assoc) return ($this->_resultsArray) ? $this->_resultsArray : [];
+		return ($this->_results) ? $this->_results : [];
+	}
+
+	public function first($assoc = false)
+	{
+		return ($this->count() > 0)  ?  $this->results($assoc)[0]  :  [];
+	}
+
+	public function count()
+	{
+		return $this->_count;
+	}
+
+	public function error()
+	{
+		return $this->_error;
+	}
+
+	public function errorInfo()
+	{
+		return $this->_errorInfo;
+	}
+
+	public function errorString()
+	{
+		return 'ERROR #' . $this->_errorInfo[0] . ': ' . $this->_errorInfo[2];
+	}
+
+	public function lastId()
+	{
+		return $this->_lastId;
+	}
+
+	public function getQueryCount()
+	{
+		return $this->_queryCount;
+	}
+
+	private function get_subquery_sql($action, $table, $where, &$values, &$is_ok)
+	{
+		$table = $this->_sanitizeTableName($table);
+		$action = ($action === '*') ? '*' : $this->_sanitizeColumnName($action);
+		if (is_array($where))
+			if ($where_text = $this->_calcWhere($where, $values, "and", $is_ok))
+				$where_text = " WHERE $where_text";
+
+		return " (SELECT $action FROM $table$where_text)";
+	}
+
+	/* Deprecated method cell
+
+	public function cell($tablecolumn, $id = [])
+	{
+		$input = explode(".", $tablecolumn, 2);
+
+		if (count($input) != 2)
+			return null;
+
+		$result = $this->action("SELECT {$input[1]}", $input[0], (is_numeric($id) ? ["id", "=", $id] : $id));
+
+		return ($result && $this->_count > 0)  ?  $this->_resultsArray[0][$input[1]]  :  null;
+	}
+	*/
+
+	public function cell($tablecolumn, $id = [])
+	{
+		$input = explode(".", $tablecolumn, 2);
+
+		if (count($input) != 2)
+			return null;
+
+		$table = $input[0];
+		$column = $input[1];
+
+		$safeColumn = $this->_sanitizeColumnName($column);
+
+		$result = $this->action("SELECT {$safeColumn}", $table, (is_numeric($id) ? ["id", "=", $id] : $id));
+
+		return ($result && $this->_count > 0) ? $this->_resultsArray[0][$column] : null;
+	}
+
+	public function getColCount()
+	{
+		return $this->_query->columnCount();
+	}
+
+	public function getColMeta($counter)
+	{
+		return $this->_query->getColumnMeta($counter);
+	}
+
+	public function setLogging($logging, $tables_only = [])
+	{
+		$this->database_logging = $logging;
+		$this->database_logging_tables_only = $tables_only;
+	}
+
+	private function logQuery($action, $table, $data)
+	{
+		global $database_logging, $database_logging_tables_only, $user;
+
+		// Logging can be enabled either via setLogging() (instance properties)
+		// or the legacy global $database_logging flag. Honor whichever is set.
+		$loggingEnabled = $this->database_logging
+			|| (isset($database_logging) && $database_logging);
+		if (!$loggingEnabled) {
+			return;
+		}
+
+		// Table allow-list: prefer the instance setting, fall back to the global.
+		$tablesOnly = !empty($this->database_logging_tables_only)
+			? $this->database_logging_tables_only
+			: ($database_logging_tables_only ?? []);
+		if (!empty($tablesOnly) && !in_array($table, $tablesOnly)) {
+			return;
+		}
+
+		if ($table === 'logs') {
+			return;
+		}
+
+		$user_id = isset($user) && $user->isLoggedIn() ? $user->data()->id : 0;
+		$logtype = "DATABASE_{$action}";
+		$lognote = "Table: {$table}";
+		$metadata = json_encode($data);
+
+		// Generate stacktrace
+		$stacktrace = $this->getStackTrace();
+
+		// Add stacktrace to metadata
+		$metadata = json_decode($metadata, true);
+		$metadata['stacktrace'] = $stacktrace;
+		$metadata = json_encode($metadata);
+
+		logger($user_id, $logtype, $lognote, $metadata);
+	}
+
+	private function getStackTrace()
+	{
+		$stacktrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
+		$trace = [];
+
+		// Start from index 2 to skip the current method and logQuery method
+		for ($i = 2; $i < count($stacktrace); $i++) {
+			$step = $stacktrace[$i];
+			$trace[] = [
+				'file' => isset($step['file']) ? $step['file'] : 'unknown',
+				'line' => isset($step['line']) ? $step['line'] : 'unknown',
+				'function' => $step['function'],
+				'class' => isset($step['class']) ? $step['class'] : 'unknown',
+			];
+		}
+
+		return $trace;
+	}
+
+	/**
+	 * Check if a column exists in a table
+	 * @param string $table The table name
+	 * @param string $column The column name
+	 * @return bool True if column exists, false otherwise
+	 */
+	public function columnExists($table, $column)
+	{
+		$table = $this->_sanitizeTableName($table);
+		try {
+			$sql = "SHOW COLUMNS FROM {$table} LIKE ?";
+			$result = $this->query($sql, [$column]);
+			return $result->count() > 0;
+		} catch (Exception $e) {
+			// Table doesn't exist or other error
+			return false;
+		}
+	}
+
+
+	/**
+	 * Check if an index exists on a table
+	 * @param string $table The table name
+	 * @param string $indexName The index name
+	 * @return bool True if index exists, false otherwise
+	 */
+	public function indexExists($table, $indexName)
+	{
+		$table = $this->_sanitizeTableName($table);
+		try {
+			$sql = "SHOW INDEX FROM {$table} WHERE Key_name = ?";
+			$result = $this->query($sql, [$indexName]);
+			return $result->count() > 0;
+		} catch (Exception $e) {
+			// Table doesn't exist or other error
+			return false;
+		}
+	}
+
+	/**
+	 * Check if a table exists in the database
+	 * @param string $table The table name
+	 * @return bool True if table exists, false otherwise
+	 */
+	public function tableExists($table)
+	{
+		try {
+			// Validate table name format (throws if invalid) but don't use the backticked result
+			// SHOW TABLES LIKE requires a string pattern, not a backticked identifier
+			$this->_sanitizeTableName($table);
+			$sql = "SHOW TABLES LIKE ?";
+			$result = $this->query($sql, [$table]);
+			return $result->count() > 0;
+		} catch (Exception $e) {
+			return false;
+		}
+	}
+
+	/**
+	 * Get detailed information about a column
+	 * @param string $table The table name
+	 * @param string $column The column name
+	 * @return array|null Column information array or null if not found
+	 */
+	public function getColumnInfo($table, $column)
+	{
+		$table = $this->_sanitizeTableName($table);
+		try {
+			$sql = "SHOW COLUMNS FROM {$table} LIKE ?";
+			$result = $this->query($sql, [$column]);
+
+			if ($result->count() > 0) {
+				$columnData = $result->first(true);
+				return [
+					'field' => $columnData['Field'],
+					'type' => $columnData['Type'],
+					'null' => $columnData['Null'] === 'YES',
+					'key' => $columnData['Key'],
+					'default' => $columnData['Default'],
+					'extra' => $columnData['Extra']
+				];
+			}
+			return null;
+		} catch (Exception $e) {
+			return null;
+		}
+	}
+
+	/**
+	 * Safely add a column to a table with error handling and logging
+	 * @param string $table The table name
+	 * @param string $column The column name
+	 * @param string $definition The column definition (e.g., "VARCHAR(255) DEFAULT NULL")
+	 * @return bool True if successful, false otherwise
+	 */
+	public function addColumn($table, $column, $definition)
+	{
+		try {
+			// Check if column already exists
+			if ($this->columnExists($table, $column)) {
+
+				return true;
+			}
+
+			$sanitizedTable = $this->_sanitizeTableName($table);
+			$sql = "ALTER TABLE {$sanitizedTable} ADD COLUMN " . $this->_sanitizeColumnName($column) . " {$definition}";
+			$result = $this->query($sql);
+
+			if (!$result->error()) {
+
+				return true;
+			} else {
+				$errorMsg = $this->errorString() ?: "Unknown error adding column {$column} to table {$table}";
+
+				return false;
+			}
+		} catch (Exception $e) {
+
+			return false;
+		}
+	}
+
+	/**
+	 * Add an index to a table if the table exists and the index doesn't
+	 * @param string $table The table name
+	 * @param string $name The index name
+	 * @param string $columns The column(s) for the index (e.g., "col1, col2")
+	 * @return bool True if successful or index already exists, false otherwise
+	 */
+	public function addIndex($table, $name, $columns)
+	{
+		try {
+			if (!$this->tableExists($table)) return false;
+			if ($this->indexExists($table, $name)) return true;
+
+			$sanitizedTable = $this->_sanitizeTableName($table);
+			$sanitizedName = $this->_sanitizeColumnName($name);
+			$result = $this->query("ALTER TABLE {$sanitizedTable} ADD INDEX {$sanitizedName} ({$columns})"); // nosemgrep: userspice-raw-query-concat - table and index names are sanitized, $columns is internal
+			return !$result->error();
+		} catch (Exception $e) {
+			return false;
+		}
+	}
+
+	/**
+	 * Drop an index from a table if it exists
+	 * @param string $table The table name
+	 * @param string $name The index name
+	 * @return bool True if successful or index doesn't exist, false otherwise
+	 */
+	public function dropIndex($table, $name)
+	{
+		try {
+			if (!$this->indexExists($table, $name)) return true;
+
+			$sanitizedTable = $this->_sanitizeTableName($table);
+			$sanitizedName = $this->_sanitizeColumnName($name);
+			$result = $this->query("ALTER TABLE {$sanitizedTable} DROP INDEX {$sanitizedName}"); // nosemgrep: userspice-raw-query-concat - table and index names are sanitized
+			return !$result->error();
+		} catch (Exception $e) {
+			return false;
+		}
+	}
+
+	/**
+	 * Safely modify/rename a column with error handling and logging
+	 * @param string $table The table name
+	 * @param string $oldColumn The current column name
+	 * @param string $newColumn The new column name
+	 * @param string $definition The new column definition
+	 * @return bool True if successful, false otherwise
+	 */
+	public function modifyColumn($table, $oldColumn, $newColumn, $definition)
+	{
+		try {
+			// Check if old column exists
+			if (!$this->columnExists($table, $oldColumn)) {
+
+				return false;
+			}
+
+			$sanitizedTable = $this->_sanitizeTableName($table);
+			$sql = "ALTER TABLE {$sanitizedTable} CHANGE " . $this->_sanitizeColumnName($oldColumn) . " " . $this->_sanitizeColumnName($newColumn) . " {$definition}";
+			$result = $this->query($sql);
+
+			if (!$result->error()) {
+
+				return true;
+			} else {
+				$errorMsg = $this->errorString() ?: "Unknown error modifying column {$oldColumn} in table {$table}";
+
+				return false;
+			}
+		} catch (Exception $e) {
+
+			return false;
+		}
+	}
+
+	// detect if connection is still alive
+	public function ping(): bool
+	{
+		try {
+			if (!$this->_pdo) return false;
+			$this->_pdo->query('SELECT 1');
+			return true;
+		} catch (PDOException $e) {
+			return false;
+		}
+	}
+
+	/**
+	 * Reconnect to the database, resetting the PDO instance
+	 * This is useful for handling connection timeouts or lost connections, especially on websockets and other long-lived connections.
+	 */
+	public function reconnect(): void
+	{
+		$this->_pdo = null;
+		try {
+			$this->_pdo = new PDO($this->dsn, $this->user, $this->pass, $this->opts);
+			if (Config::get('mysql/force_utc_mysql') === true) {
+				$this->_pdo->exec("SET time_zone = '+00:00'");
+			}
+			$this->applyCharsetAndCollation();
+			$this->_error = false; // Reset error state on successful reconnect
+			$this->_errorInfo = ['00000', null, null];
+		} catch (PDOException $e) {
+			$this->_error = true;
+			$this->_errorInfo = $e->errorInfo ?? ['HY000', null, $e->getMessage()];
+			error_log('Database reconnect failed: ' . $e->getMessage());
+			throw $e;
+		}
+	}
+
+
+	/**
+	 * Validate that a string is a safe MySQL identifier (charset/collation name)
+	 * MySQL charset/collation names are typically letters, numbers, underscore
+	 */
+	private function is_safe_mysql_identifier(string $s): bool
+	{
+		return (bool) preg_match('/\A[a-zA-Z0-9_]+\z/', $s);
+	}
+
+	/**
+	 * Get validated charset from config, with fallback to utf8mb4
+	 */
+	private function getValidatedCharset(): string
+	{
+		$charset = Config::get('mysql/charset') ?: 'utf8mb4';
+		$charset = trim((string)$charset);
+
+		if (!$this->is_safe_mysql_identifier($charset)) {
+			throw new Exception("Invalid charset: must contain only alphanumeric and underscore characters");
+		}
+
+		return $charset;
+	}
+
+	/**
+	 * Apply charset and collation settings to the PDO connection
+	 * Only sets collation if configured in config
+	 */
+	private function applyCharsetAndCollation(): void
+	{
+		$charset = Config::get('mysql/charset');
+		$collation = Config::get('mysql/collation');
+
+		// Only proceed if charset is configured
+		if ($charset !== false && $charset !== null && $charset !== '') {
+			$charset = trim((string)$charset);
+
+			if (!$this->is_safe_mysql_identifier($charset)) {
+				throw new Exception("Invalid charset: must contain only alphanumeric and underscore characters");
+			}
+
+			$sql = "SET NAMES '{$charset}'";
+
+			// Only set collation if configured
+			if ($collation !== null && $collation !== '' && $collation !== false) {
+				$collation = trim((string)$collation);
+
+				if (!$this->is_safe_mysql_identifier($collation)) {
+					throw new Exception("Invalid collation: must contain only alphanumeric and underscore characters");
+				}
+
+				$sql .= " COLLATE '{$collation}'";
+			}
+
+			$this->_pdo->exec($sql);
+		}
+	}
+
+	private function _sanitizeTableName(string $table): string
+	{
+		// Empty check (type is already enforced by PHP type hint)
+		if ($table === '') {
+			throw new InvalidArgumentException("Invalid table name: cannot be empty.");
+		}
+
+		// Support database.table format for cross-database queries
+		$parts = explode('.', $table);
+		if (count($parts) > 2) {
+			throw new InvalidArgumentException("Invalid table name: '{$table}'. Too many dot-separated parts.");
+		}
+
+		$quoted = [];
+		foreach ($parts as $part) {
+			if (strlen($part) > 64) {
+				throw new InvalidArgumentException("Identifier too long (max 64 chars): '{$part}'.");
+			}
+
+			if (!preg_match('/^[A-Za-z0-9_]+$/', $part)) {
+				throw new InvalidArgumentException("Invalid table name: '{$table}'. Each part must contain only alphanumeric characters and underscores.");
+			}
+
+			$quoted[] = "`{$part}`";
+		}
+
+		return implode('.', $quoted);
+	}
+
+	private function _sanitizeColumnName(string $column): string
+	{
+		// Empty check (type is already enforced by PHP type hint)
+		if ($column === '') {
+			throw new InvalidArgumentException("Invalid column name: cannot be empty.");
+		}
+
+		if (strlen($column) > 64) {
+			throw new InvalidArgumentException("Column name too long (max 64 chars).");
+		}
+
+		// Column names must start with letter or underscore, followed by alphanumeric/underscore
+		// This rejects: names starting with digits, *, table.column syntax, reserved chars
+		if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $column)) {
+			throw new InvalidArgumentException("Invalid column name: '{$column}'. Must start with letter/underscore, contain only alphanumeric/underscore.");
+		}
+
+		return "`{$column}`";
+	}
+}

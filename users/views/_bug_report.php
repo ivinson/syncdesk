@@ -1,0 +1,237 @@
+<?php $dataB = $db->query("select version()")->results(true);
+
+$api = safeCurl("https://api.userspice.com/api/v2/bugs/");
+if (!empty($_POST)) {
+  $token = $_POST['csrf'];
+  if (!Token::check($token)) {
+    include($abs_us_root . $us_url_root . 'usersc/scripts/token_error.php');
+  }
+}
+
+
+if (!empty($_POST['submitKey'])) {
+  $spice_api = Input::get("spice_api");
+  $db->update('settings', 1, ['spice_api' => $spice_api]);
+  usSuccess("Key added");
+  Redirect::to('admin.php?view=bugs');
+}
+if (!empty($_POST) && $settings->spice_api != '') {
+  $data = array(
+    'key' => $settings->spice_api,
+    'us' => Input::sanitize($user_spice_ver),
+    'db' => Input::sanitize($dataB[0]["version()"]),
+    'os' => Input::sanitize(php_uname('s') . "-" . php_uname('v')),
+    'sw' => Input::sanitize($_SERVER['SERVER_SOFTWARE']),
+    'brief' => Input::get('brief'),
+    'bt' => Input::get('bugtype'),
+    'problem' => Input::get('problem'),
+    'sec' => !empty($_POST['is_security_report']) ? 1 : 0,
+    'call' => "bugreport"
+  );
+
+
+  $payload = safeCurl(json_encode($data));
+
+  $ch = curl_init($api);
+
+  //attach encoded JSON string to the POST fields
+  curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+  //set the content type to application/json
+  curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type:application/json'));
+  //return response instead of outputting
+  curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+  //execute the POST request
+  $result = curl_exec($ch);
+  $apiResponse = usValidateApiResponse($result, $ch);
+  //close cURL resource
+  if (PHP_VERSION_ID < 80500) {
+       curl_close($ch);
+  }
+  if (!$apiResponse['success']) {
+    $httpCode = $apiResponse['httpCode'];
+    if ($httpCode == 401) {
+      usError("Authentication failed. Your API key appears to be invalid or missing.");
+    } elseif ($httpCode == 403) {
+      usError("Access denied. Your IP may have been temporarily blocked.");
+    } elseif ($httpCode == 429) {
+      usError("Rate limit reached. Please try again tomorrow.");
+    } else {
+      usError(safeReturn($apiResponse['error']));
+    }
+    Redirect::to('?view=bugs');
+  }
+  $result = json_decode($apiResponse['result']);
+  if ($result->success == true) {
+    logger($user->data()->id, "your_api_bugs", $result->issue);
+    usSuccess($result->msg);
+    Redirect::to('?view=bugs&showreports=1');
+    // err($result->msg); //maybe a different alert later
+  } else {
+    usError($result->msg);
+    Redirect::to('?view=bugs');
+  }
+}
+if ($settings->spice_api != '' && !empty($_GET['showreports'])) {
+  $data = array(
+    'key' => $settings->spice_api,
+    'call' => "fetch"
+  );
+  $payload = json_encode($data);
+  $ch = curl_init($api);
+  //attach encoded JSON string to the POST fields
+  curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+  //set the content type to application/json
+  curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type:application/json'));
+  //return response instead of outputting
+  curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+  //execute the POST request
+  $result = curl_exec($ch);
+  $apiResponse = usValidateApiResponse($result, $ch);
+  //close cURL resource
+  if (PHP_VERSION_ID < 80500) {
+       curl_close($ch);
+  }
+  if (!$apiResponse['success']) {
+    $bugApiError = $apiResponse['error'];
+    $bugConnectionFailed = $apiResponse['connectionFailed'];
+    $bugHttpCode = $apiResponse['httpCode'];
+    unset($result);
+  } else {
+    $result = json_decode($apiResponse['result']);
+  }
+}
+?>
+
+<h2>Bug Report</h2>
+<div class="row">
+  <div class="col-12 col-md-6">
+    <p>A System report will be submitted with the following information to help in the diagnosis of the problem. If you don't want to submit this information, please submit a report directly at <a target="_blank" href="https://bugs.userspice.com">https://bugs.userspice.com</a>. Please note that the API may collect other information about the API call itself in order to prevent spam.
+    </p>
+    <?php if ($settings->spice_api == '') { ?>
+      <a href="https://userspice.com/developer-api-keys/"><span style='color:red'><strong>The Bug Report feature will not work with out a FREE API Key.</span></strong>
+        Get One Here</a>
+      <form class="" action="" method="post">
+        <div class="input-group">
+          <input type="password" autocomplete="new-password" class="form-control" data-desc="UserSpice API Key" name="spice_api" id="spice_api" value="<?= $settings->spice_api ?>" placeholder="Paste your key here">
+          <?= tokenHere(); ?>
+          <input type="submit" name="submitKey" value="Save Key" class="btn btn-primary">
+        </div>
+
+      </form>
+
+    <?php } ?>
+    <h3 class="mt-3">System Report</h3>
+    <strong>UserSpice Version:</strong> <?= $user_spice_ver ?><br>
+    <strong>DB Version:</strong> <?= $dataB[0]["version()"]; ?><br>
+    <strong>OS Info:</strong> <?= php_uname('s'); ?>-<?= php_uname('v'); ?></br>
+    <strong>Software Info:</strong> <?= $_SERVER['SERVER_SOFTWARE'] ?>
+  </div>
+  <div class="col-12 col-md-6">
+    <form class="" action="" method="post">
+      <?= tokenHere(); ?>
+      <label for="">Please give a brief summary of the problem</label>
+      <input class="form-control" type="text" name="brief" value="" required>
+      <label for="">What type of bug report is this?</label>
+      <select class="form-control" name="bugtype" required>
+        <option value="" disabled selected="selected">--Please Choose--</option>
+        <option value="triage">General UserSpice Bug</option>
+        <option value="plugin">Plugin/Widget/Template issue</option>
+      </select>
+      <label for="">Please give as much detail about how to recreate your problem as possible.</label>
+      <textarea class="form-control" name="problem" rows="8" cols="80" required></textarea><br>
+
+      <div class="form-check mt-2 mb-2">
+        <input class="form-check-input" type="checkbox" value="1" id="is_security_report" name="is_security_report">
+        <label class="form-check-label" for="is_security_report">
+          This is a <strong>security vulnerability</strong>. Security reports are kept private &mdash;
+          hidden from the public bug tracker, visible only to UserSpice administrators and you.
+        </label>
+      </div>
+
+      <?php if ($settings->spice_api != '') { ?>
+        <input type="submit" name="submit" value="Submit Bug Report" class="btn btn-danger text-end">
+      <?php } ?>
+    </form>
+  </div>
+</div>
+
+<?php if (isset($bugApiError)) { ?>
+  <div class="alert alert-danger mt-3" role="alert">
+    <?php if (isset($bugConnectionFailed) && $bugConnectionFailed) { ?>
+      <strong>Connection Error:</strong> <?= safeReturn($bugApiError) ?>
+    <?php } elseif (isset($bugHttpCode) && $bugHttpCode == 401) { ?>
+      <strong>Authentication Failed:</strong> Your API key appears to be invalid or missing.
+      Please verify your key on the <a href="admin.php?view=general">General Settings</a> page.
+    <?php } elseif (isset($bugHttpCode) && $bugHttpCode == 403) { ?>
+      <strong>Access Denied:</strong> Your IP address may have been temporarily blocked due to too many failed attempts.
+      Please wait and try again later, or contact support.
+    <?php } elseif (isset($bugHttpCode) && $bugHttpCode == 429) { ?>
+      <strong>Rate Limit Reached:</strong> You have exceeded the daily API request limit.
+      Please try again tomorrow.
+    <?php } else { ?>
+      <strong>API Error:</strong> <?= safeReturn($bugApiError) ?><br>
+      The API responded but was not successful. Please check your API key. Please be careful not to keep retrying or you may get banned.
+    <?php } ?>
+  </div>
+<?php } ?>
+
+<?php if ($settings->spice_api != '') { ?>
+  <div class="row mt-3 mb-2">
+    <div class="col">
+      <?php if (empty($_GET['showreports'])) { ?>
+        <a href="?view=bugs&showreports=1" class="btn btn-primary">Load My Previous Reports</a>
+      <?php } else { ?>
+        <a href="?view=bugs&showreports=1" class="btn btn-outline-secondary">Refresh Reports</a>
+        <?php if (!isset($result) || count($result->fetch) == 0) { ?>
+          <span class="ms-2 text-body-secondary">No reports found for this API key.</span>
+        <?php } ?>
+      <?php } ?>
+    </div>
+  </div>
+<?php } ?>
+
+<?php if (isset($result) && count($result->fetch) > 0) { ?>
+  <div class="row">
+    <div class="col">
+      <h3>Your Previous Reports</h3>
+      <table id="bugstable" class="table table-striped paginate">
+        <thead>
+          <tr>
+            <th>Issue ID</th>
+            <th>Summary</th>
+            <th>Status</th>
+            <th>Category</th>
+            <th>Submitted</th>
+            <th>Resolution</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($result->fetch as $p) { ?>
+            <tr>
+              <td>
+                <span class="hideMe"><?= sprintf('%08d', (int)$p->kIssueID) ?></span>
+                Issue #<?= (int)$p->kIssueID ?>
+                <?php if (!empty($p->is_security_report)) { ?>
+                  <span class="badge bg-danger">Security</span>
+                <?php } ?>
+                <?php if (!empty($p->is_hidden)) { ?>
+                  <span class="badge bg-secondary">Hidden</span>
+                <?php } ?>
+              </td>
+              <td><?= safeReturn(hed($p->Issue_Title ?? '')) ?></td>
+              <td><?= safeReturn(hed($p->Status_Text ?? '')) ?></td>
+              <td><?= safeReturn(hed($p->IssueCategory ?? '')) ?></td>
+              <td><?= safeReturn(hed($p->Issue_Submitted ?? '')) ?></td>
+              <td><?= safeReturn(hed($p->Issue_Resolution_Title ?? '')) ?></td>
+              <td><a class="btn btn-primary" target="_blank" href="https://bugs.userspice.com/usersc/issue_detail.php?id=<?= (int)$p->kIssueID ?>&source=userspice">View Ticket</a></td>
+            </tr>
+          <?php } ?>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  </div>
+
+
+<?php } ?>
