@@ -55,7 +55,7 @@ if (Input::exists()) {
                     if ($can_update) {
                         $db->query("UPDATE tasks SET status = ? WHERE id = ?", [$new_status, $task_id]);
                         $status_label = $new_status == 'pending' ? 'Pendente' : ($new_status == 'in_progress' ? 'Em andamento' : 'Concluído');
-                        Redirect::to('agent_dashboard.php?success=' . urlencode("Status da tarefa #{$task_id} alterado para '{$status_label}'!"));
+                        Redirect::to('tasks.php?success=' . urlencode("Status da tarefa #{$task_id} alterado para '{$status_label}'!"));
                     } else {
                         $error_msg = "Erro: Você não tem permissão para atualizar esta tarefa.";
                     }
@@ -98,7 +98,7 @@ if (Input::exists()) {
                     'priority' => $priority,
                     'status' => 'pending'
                 ]);
-                Redirect::to('agent_dashboard.php?success=' . urlencode("Tarefa '{$title}' criada com sucesso!"));
+                Redirect::to('tasks.php?success=' . urlencode("Tarefa '{$title}' criada com sucesso!"));
             } else {
                 $error_msg = implode("<br>", $errors);
             }
@@ -145,7 +145,7 @@ if (Input::exists()) {
                         $db->query("UPDATE tasks SET customer_id = ?, assigned_to = ?, title = ?, description = ?, priority = ?, status = ? WHERE id = ?", [
                             $customer_id, $assigned_to, $title, $description, $priority, $status, $task_id
                         ]);
-                        Redirect::to('agent_dashboard.php?success=' . urlencode("Tarefa #{$task_id} atualizada com sucesso!"));
+                        Redirect::to('tasks.php?success=' . urlencode("Tarefa #{$task_id} atualizada com sucesso!"));
                     } else {
                         $error_msg = implode("<br>", $errors);
                     }
@@ -173,7 +173,7 @@ if (Input::exists()) {
                 
                 if ($can_delete) {
                     $db->query("DELETE FROM tasks WHERE id = ?", [$task_id]);
-                    Redirect::to('agent_dashboard.php?success=' . urlencode("Tarefa #{$task_id} excluída com sucesso!"));
+                    Redirect::to('tasks.php?success=' . urlencode("Tarefa #{$task_id} excluída com sucesso!"));
                 } else {
                     $error_msg = "Erro: Você não tem permissão para excluir esta tarefa.";
                 }
@@ -768,102 +768,7 @@ foreach ($assets_list as $asset) {
 
 <div class="wrapper">
     <!-- Sidebar Navigation -->
-    <aside class="sidebar">
-        <div class="brand-section">
-            <a href="index.php" class="brand-logo">
-                <i class="bi bi-cpu text-primary"></i>
-                <span class="brand-title">SyncDesk</span>
-            </a>
-            <div class="tenant-card">
-                <div class="d-flex align-items-center gap-2">
-                    <i class="bi bi-building text-primary"></i>
-                    <div class="text-truncate" style="max-width: 140px;">Empresa Exemplo</div>
-                </div>
-                <i class="bi bi-chevron-expand text-muted"></i>
-            </div>
-        </div>
-
-        <ul class="sidebar-menu">
-            <li class="menu-item">
-                <a href="#" class="menu-link">
-                    <i class="bi bi-grid-1x2-fill"></i>
-                    <span>Dashboard</span>
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="#" class="menu-link">
-                    <i class="bi bi-chat-left-text"></i>
-                    <span>Atendimentos</span>
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="#" class="menu-link">
-                    <i class="bi bi-people"></i>
-                    <span>Clientes</span>
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="#" class="menu-link">
-                    <i class="bi bi-journal-text"></i>
-                    <span>Knowledge Base</span>
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="agent_dashboard.php" class="menu-link active">
-                    <i class="bi bi-check2-square"></i>
-                    <span>Tarefas</span>
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="#" class="menu-link">
-                    <i class="bi bi-folder2"></i>
-                    <span>Projetos</span>
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="#" class="menu-link">
-                    <i class="bi bi-bar-chart"></i>
-                    <span>Relatórios</span>
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="#" class="menu-link d-flex justify-content-between align-items-center">
-                    <div class="d-flex align-items-center gap-2">
-                        <i class="bi bi-bell"></i>
-                        <span>Notificações</span>
-                    </div>
-                    <span class="badge bg-primary rounded-pill" style="font-size: 0.7rem;">12</span>
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="#" class="menu-link">
-                    <i class="bi bi-gear"></i>
-                    <span>Configurações</span>
-                </a>
-            </li>
-            <?php if ($is_admin): ?>
-                <li class="menu-item">
-                    <a href="manage_customer_agents.php" class="menu-link">
-                        <i class="bi bi-person-gear"></i>
-                        <span>Vincular Equipe</span>
-                    </a>
-                </li>
-            <?php endif; ?>
-        </ul>
-
-        <div class="sidebar-footer">
-            <div class="profile-avatar">
-                <?= strtoupper(substr($full_name, 0, 1)) ?>
-            </div>
-            <div class="profile-info">
-                <span class="profile-name" title="<?= $full_name ?>"><?= $full_name ?></span>
-                <span class="profile-role"><?= $role_title ?></span>
-            </div>
-            <a href="users/logout.php" class="ms-auto text-muted hover-white" title="Sair">
-                <i class="bi bi-box-arrow-right fs-5"></i>
-            </a>
-        </div>
-    </aside>
+    <?php require_once 'sidebar.php'; ?>
 
     <!-- Main Content Area -->
     <main class="main-content">
@@ -920,7 +825,7 @@ foreach ($assets_list as $asset) {
         <!-- Stat Counter Cards Row -->
         <div class="row g-3 stats-row">
             <div class="col-md-2-4 col-sm-6 col-12">
-                <a href="agent_dashboard.php" class="stat-card">
+                <a href="tasks.php" class="stat-card">
                     <div class="stat-icon stat-icon-blue">
                         <i class="bi bi-list-task"></i>
                     </div>
@@ -931,7 +836,7 @@ foreach ($assets_list as $asset) {
                 </a>
             </div>
             <div class="col-md-2-4 col-sm-6 col-12">
-                <a href="agent_dashboard.php?status=pending" class="stat-card">
+                <a href="tasks.php?status=pending" class="stat-card">
                     <div class="stat-icon stat-icon-orange">
                         <i class="bi bi-clock-history"></i>
                     </div>
@@ -942,7 +847,7 @@ foreach ($assets_list as $asset) {
                 </a>
             </div>
             <div class="col-md-2-4 col-sm-6 col-12">
-                <a href="agent_dashboard.php?status=in_progress" class="stat-card">
+                <a href="tasks.php?status=in_progress" class="stat-card">
                     <div class="stat-icon stat-icon-purple">
                         <i class="bi bi-play-circle"></i>
                     </div>
@@ -953,7 +858,7 @@ foreach ($assets_list as $asset) {
                 </a>
             </div>
             <div class="col-md-2-4 col-sm-6 col-12">
-                <a href="agent_dashboard.php?status=completed" class="stat-card">
+                <a href="tasks.php?status=completed" class="stat-card">
                     <div class="stat-icon stat-icon-green">
                         <i class="bi bi-check-all"></i>
                     </div>
@@ -982,7 +887,7 @@ foreach ($assets_list as $asset) {
                 <div class="d-flex align-items-center gap-3">
                     <ul class="nav nav-pills nav-fill bg-light p-1 rounded-3" style="font-size: 0.85rem; font-weight: 500;">
                         <li class="nav-item">
-                            <a class="nav-link active py-1 px-3 text-primary bg-white shadow-sm rounded-2" href="agent_dashboard.php">Lista</a>
+                            <a class="nav-link active py-1 px-3 text-primary bg-white shadow-sm rounded-2" href="tasks.php">Lista</a>
                         </li>
                         <li class="nav-item">
                             <a class="nav-link py-1 px-3 text-muted" href="#">Quadro</a>
@@ -1008,7 +913,7 @@ foreach ($assets_list as $asset) {
                         <option value="completed" <?= Input::get('status') == 'completed' ? 'selected' : '' ?>>Concluído</option>
                     </select>
                     <?php if (Input::get('priority') || Input::get('status')): ?>
-                        <a href="agent_dashboard.php" class="btn btn-outline-secondary btn-sm rounded-3 d-inline-flex align-items-center" title="Limpar Filtros">
+                        <a href="tasks.php" class="btn btn-outline-secondary btn-sm rounded-3 d-inline-flex align-items-center" title="Limpar Filtros">
                             <i class="bi bi-x-circle"></i>
                         </a>
                     <?php endif; ?>
