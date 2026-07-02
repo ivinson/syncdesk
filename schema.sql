@@ -10,9 +10,12 @@ CREATE TABLE IF NOT EXISTS `customers` (
   `name` VARCHAR(255) NOT NULL,
   `company_name` VARCHAR(255) NOT NULL,
   `status` TINYINT NOT NULL DEFAULT 1, -- 1 = Active, 0 = Inactive
+  `support_login` VARCHAR(255) DEFAULT NULL,
+  `support_password` VARCHAR(255) DEFAULT NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 -- 2. Customer Agent Pivot Table (Many-to-Many relationship between agents and customers)
 CREATE TABLE IF NOT EXISTS `customer_agent` (

@@ -152,6 +152,83 @@ if (Input::exists()) {
                 $error_msg = "Ativo não encontrado ou permissão negada.";
             }
         }
+        
+        // 4. CREATE CUSTOMER
+        else if ($action === 'create_customer') {
+            $name = trim(Input::get('name'));
+            $company_name = trim(Input::get('company_name'));
+            $status = (int)Input::get('status');
+            $support_login = trim(Input::get('support_login'));
+            $support_password = trim(Input::get('support_password'));
+            
+            $errors = [];
+            if (empty($name)) $errors[] = "O nome do cliente é obrigatório.";
+            if (empty($company_name)) $errors[] = "A razão social é obrigatória.";
+            
+            if (empty($errors)) {
+                $db->insert('customers', [
+                    'name' => $name,
+                    'company_name' => $company_name,
+                    'status' => $status,
+                    'support_login' => !empty($support_login) ? $support_login : null,
+                    'support_password' => !empty($support_password) ? $support_password : null
+                ]);
+                
+                $new_customer_id = $db->lastId();
+                if (!$is_admin) {
+                    $db->insert('customer_agent', [
+                        'customer_id' => $new_customer_id,
+                        'user_id' => $user_id
+                    ]);
+                }
+                
+                Redirect::to("manage_assets.php?success=" . urlencode("Cliente '{$name}' cadastrado com sucesso!"));
+            } else {
+                $error_msg = implode("<br>", $errors);
+            }
+        }
+        
+        // 5. EDIT CUSTOMER
+        else if ($action === 'edit_customer') {
+            $cust_id = (int)Input::get('customer_id');
+            $name = trim(Input::get('name'));
+            $company_name = trim(Input::get('company_name'));
+            $status = (int)Input::get('status');
+            $support_login = trim(Input::get('support_login'));
+            $support_password = trim(Input::get('support_password'));
+            
+            $errors = [];
+            if (empty($name)) $errors[] = "O nome do cliente é obrigatório.";
+            if (empty($company_name)) $errors[] = "A razão social é obrigatória.";
+            
+            if ($is_admin) {
+                $cust_query = $db->query("SELECT * FROM customers WHERE id = ?", [$cust_id]);
+            } else {
+                $cust_query = $db->query("
+                    SELECT c.* 
+                    FROM customers c 
+                    JOIN customer_agent ca ON c.id = ca.customer_id 
+                    WHERE c.id = ? AND ca.user_id = ?", [$cust_id, $user_id]);
+            }
+            
+            if ($cust_query->count() > 0) {
+                if (empty($errors)) {
+                    $db->query("UPDATE customers SET name = ?, company_name = ?, status = ?, support_login = ?, support_password = ? WHERE id = ?", [
+                        $name, $company_name, $status, 
+                        !empty($support_login) ? $support_login : null,
+                        !empty($support_password) ? $support_password : null,
+                        $cust_id
+                    ]);
+                    
+                    $redirect_url = $customer_id > 0 ? "manage_assets.php?customer_id={$cust_id}" : "manage_assets.php";
+                    Redirect::to($redirect_url . "&success=" . urlencode("Cliente '{$name}' atualizado com sucesso!"));
+                } else {
+                    $error_msg = implode("<br>", $errors);
+                }
+            } else {
+                $error_msg = "Cliente não encontrado ou permissão negada.";
+            }
+        }
     } else {
         $error_msg = "Erro: Validação de token CSRF falhou.";
     }
@@ -171,7 +248,6 @@ if ($current_customer) {
             SELECT c.*, COUNT(a.id) as total_assets 
             FROM customers c 
             LEFT JOIN assets a ON c.id = a.customer_id 
-            WHERE c.status = 1 
             GROUP BY c.id 
             ORDER BY c.name ASC";
         $customers = $db->query($customers_sql)->results();
@@ -181,7 +257,7 @@ if ($current_customer) {
             FROM customers c 
             JOIN customer_agent ca ON c.id = ca.customer_id 
             LEFT JOIN assets a ON c.id = a.customer_id 
-            WHERE ca.user_id = ? AND c.status = 1 
+            WHERE ca.user_id = ? 
             GROUP BY c.id 
             ORDER BY c.name ASC";
         $customers = $db->query($customers_sql, [$user_id])->results();
@@ -560,11 +636,35 @@ if ($current_customer) {
                         <i class="bi bi-arrow-left"></i> Voltar para Clientes
                     </a>
                     <h2 class="mb-1 fw-bold">Ativos de <?= htmlspecialchars($current_customer->name) ?></h2>
-                    <p class="text-muted mb-0"><?= htmlspecialchars($current_customer->company_name) ?></p>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <span class="text-muted"><?= htmlspecialchars($current_customer->company_name) ?></span>
+                        <span class="badge <?= $current_customer->status == 1 ? 'bg-success-subtle text-success border border-success-subtle' : 'bg-danger-subtle text-danger border border-danger-subtle' ?> rounded-pill text-xs">
+                            <?= $current_customer->status == 1 ? 'Ativo' : 'Inativo' ?>
+                        </span>
+                        <?php if (!empty($current_customer->support_login) || !empty($current_customer->support_password)): ?>
+                            <span class="badge bg-info-subtle text-info border border-info-subtle rounded-pill text-xs" title="Login: <?= htmlspecialchars($current_customer->support_login) ?> | Senha: <?= htmlspecialchars($current_customer->support_password) ?>">
+                                <i class="bi bi-shield-lock me-1"></i> Suporte Disponível
+                            </span>
+                        <?php endif; ?>
+                    </div>
                 </div>
-                <button class="btn btn-primary btn-sm px-3 rounded-3 d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#createAssetModal" style="font-weight: 500;">
-                    <i class="bi bi-plus-lg"></i> Novo Ativo
-                </button>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-outline-secondary btn-sm px-3 rounded-3 d-inline-flex align-items-center gap-2 edit-customer-btn" 
+                            data-bs-toggle="modal" 
+                            data-bs-target="#editCustomerModal"
+                            data-customer-id="<?= $current_customer->id ?>"
+                            data-customer-name="<?= htmlspecialchars($current_customer->name) ?>"
+                            data-customer-company="<?= htmlspecialchars($current_customer->company_name) ?>"
+                            data-customer-status="<?= $current_customer->status ?>"
+                            data-customer-login="<?= htmlspecialchars($current_customer->support_login ?? '') ?>"
+                            data-customer-password="<?= htmlspecialchars($current_customer->support_password ?? '') ?>"
+                            style="font-weight: 500;">
+                        <i class="bi bi-pencil"></i> Editar Cliente
+                    </button>
+                    <button class="btn btn-primary btn-sm px-3 rounded-3 d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#createAssetModal" style="font-weight: 500;">
+                        <i class="bi bi-plus-lg"></i> Novo Ativo
+                    </button>
+                </div>
             </div>
 
             <!-- Assets Cards Grid -->
@@ -651,9 +751,14 @@ if ($current_customer) {
 
         <!-- VIEW SCENARIO B: CLIENTS LIST FOR ASSET MANAGEMENT -->
         <?php else: ?>
-            <div class="mb-4">
-                <h2 class="mb-1 fw-bold">Gerenciamento de Ativos</h2>
-                <p class="text-muted mb-0">Selecione o cliente para visualizar e gerenciar suas credenciais, webhooks e instâncias.</p>
+            <div class="d-flex justify-content-between align-items-end mb-4">
+                <div>
+                    <h2 class="mb-1 fw-bold">Gerenciamento de Ativos</h2>
+                    <p class="text-muted mb-0">Selecione o cliente para visualizar e gerenciar suas credenciais, webhooks e instâncias.</p>
+                </div>
+                <button type="button" class="btn btn-primary btn-sm px-3 rounded-3 d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#createCustomerModal" style="font-weight: 500;">
+                    <i class="bi bi-plus-lg"></i> Adicionar cliente
+                </button>
             </div>
 
             <div class="row g-3">
@@ -662,23 +767,57 @@ if ($current_customer) {
                         <div class="text-center py-5 text-muted bg-white rounded-4 border">
                             <i class="bi bi-people fs-1 d-block mb-2 text-secondary"></i>
                             Nenhum cliente associado ou disponível.
+                            <button type="button" class="btn btn-outline-primary btn-sm d-block mx-auto mt-3 rounded-3" data-bs-toggle="modal" data-bs-target="#createCustomerModal">
+                                Adicionar Primeiro Cliente
+                            </button>
                         </div>
                     </div>
                 <?php else: ?>
                     <?php foreach ($customers as $cust): ?>
                         <div class="col-md-4 col-sm-6 col-12">
-                            <a href="manage_assets.php?customer_id=<?= $cust->id ?>" class="premium-card customer-card">
-                                <h5 class="fw-bold mb-1 text-dark"><?= htmlspecialchars($cust->name) ?></h5>
-                                <p class="text-muted small mb-3"><?= htmlspecialchars($cust->company_name) ?></p>
-                                <div class="mt-auto d-flex justify-content-between align-items-center">
-                                    <span class="badge bg-light text-secondary border rounded-pill">
+                            <div class="premium-card customer-card p-3 d-flex flex-column h-100 position-relative">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <div>
+                                        <h5 class="fw-bold mb-0 text-dark"><?= htmlspecialchars($cust->name) ?></h5>
+                                        <span class="text-muted small"><?= htmlspecialchars($cust->company_name) ?></span>
+                                    </div>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm p-1 rounded-2 edit-customer-btn" 
+                                            data-bs-toggle="modal" 
+                                            data-bs-target="#editCustomerModal"
+                                            data-customer-id="<?= $cust->id ?>"
+                                            data-customer-name="<?= htmlspecialchars($cust->name) ?>"
+                                            data-customer-company="<?= htmlspecialchars($cust->company_name) ?>"
+                                            data-customer-status="<?= $cust->status ?>"
+                                            data-customer-login="<?= htmlspecialchars($cust->support_login ?? '') ?>"
+                                            data-customer-password="<?= htmlspecialchars($cust->support_password ?? '') ?>"
+                                            title="Editar Cliente">
+                                        <i class="bi bi-pencil" style="font-size: 0.85rem;"></i>
+                                    </button>
+                                </div>
+                                
+                                <div class="mb-3 d-flex gap-2 flex-wrap">
+                                    <span class="badge <?= $cust->status == 1 ? 'bg-success-subtle text-success border border-success-subtle' : 'bg-danger-subtle text-danger border border-danger-subtle' ?> rounded-pill small">
+                                        <?= $cust->status == 1 ? 'Ativo' : 'Inativo' ?>
+                                    </span>
+                                    <span class="badge bg-light text-secondary border rounded-pill small">
                                         <i class="bi bi-hdd-network-fill me-1"></i><?= $cust->total_assets ?> Ativos
                                     </span>
-                                    <span class="text-primary fw-semibold small d-inline-flex align-items-center gap-1">
-                                        Gerenciar <i class="bi bi-chevron-right"></i>
-                                    </span>
                                 </div>
-                            </a>
+
+                                <?php if (!empty($cust->support_login) || !empty($cust->support_password)): ?>
+                                    <div class="p-2 bg-light rounded-3 border mb-3" style="font-size:0.8rem;">
+                                        <div class="text-muted fw-bold mb-1"><i class="bi bi-shield-lock me-1"></i>Conta de Suporte:</div>
+                                        <div class="text-truncate"><strong>Login:</strong> <?= htmlspecialchars($cust->support_login ?? 'N/A') ?></div>
+                                        <div class="text-truncate"><strong>Senha:</strong> <?= htmlspecialchars($cust->support_password ?? 'N/A') ?></div>
+                                    </div>
+                                <?php endif; ?>
+
+                                <div class="mt-auto pt-2 border-top d-flex justify-content-between align-items-center">
+                                    <a href="manage_assets.php?customer_id=<?= $cust->id ?>" class="text-primary fw-semibold small d-inline-flex align-items-center gap-1 text-decoration-none">
+                                        Gerenciar Ativos <i class="bi bi-chevron-right"></i>
+                                    </a>
+                                </div>
+                            </div>
                         </div>
                     <?php endforeach; ?>
                 <?php endif; ?>
@@ -809,6 +948,111 @@ if ($current_customer) {
     </div>
 </div>
 <?php endif; ?>
+
+<!-- ==========================================
+      MODAL: CREATE CUSTOMER (Bootstrap 5)
+     ========================================== -->
+<div class="modal fade" id="createCustomerModal" tabindex="-1" aria-labelledby="createCustomerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form method="POST" action="">
+                <input type="hidden" name="csrf" value="<?= Token::generate() ?>">
+                <input type="hidden" name="action" value="create_customer">
+                
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold" id="createCustomerModalLabel"><i class="bi bi-person-plus text-primary me-2"></i>Novo Cliente</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body bg-white rounded-bottom-4">
+                    <div class="mb-3">
+                        <label for="create_cust_name" class="form-label fw-semibold" style="font-size:0.9rem;">Nome Fantasia / Identificação</label>
+                        <input type="text" class="form-control rounded-3" id="create_cust_name" name="name" required placeholder="Ex: Empresa ABC">
+                    </div>
+                    <div class="mb-3">
+                        <label for="create_cust_company" class="form-label fw-semibold" style="font-size:0.9rem;">Razão Social</label>
+                        <input type="text" class="form-control rounded-3" id="create_cust_company" name="company_name" required placeholder="Ex: Empresa ABC Ltda">
+                    </div>
+                    <div class="mb-3">
+                        <label for="create_cust_status" class="form-label fw-semibold" style="font-size:0.9rem;">Status</label>
+                        <select class="form-select rounded-3" id="create_cust_status" name="status" required>
+                            <option value="1" selected>Ativo</option>
+                            <option value="0">Inativo</option>
+                        </select>
+                    </div>
+                    <div class="p-3 bg-light rounded-3 border mb-3">
+                        <h6 class="fw-bold mb-3 border-bottom pb-2 text-secondary" style="font-size:0.85rem;"><i class="bi bi-shield-lock me-1"></i>Conta de Suporte do Cliente</h6>
+                        <div class="mb-2">
+                            <label for="create_cust_login" class="form-label small fw-semibold">Login / Usuário</label>
+                            <input type="text" class="form-control form-control-sm rounded-2" id="create_cust_login" name="support_login" placeholder="E-mail ou nome de usuário de suporte">
+                        </div>
+                        <div>
+                            <label for="create_cust_password" class="form-label small fw-semibold">Senha</label>
+                            <input type="text" class="form-control form-control-sm rounded-2" id="create_cust_password" name="support_password" placeholder="Senha da conta de suporte">
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex gap-2 justify-content-end mt-4">
+                        <button type="button" class="btn btn-light rounded-3 px-4" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary rounded-3 px-4">Salvar Cliente</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- ==========================================
+      MODAL: EDIT CUSTOMER (Bootstrap 5)
+     ========================================== -->
+<div class="modal fade" id="editCustomerModal" tabindex="-1" aria-labelledby="editCustomerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form method="POST" action="">
+                <input type="hidden" name="csrf" value="<?= Token::generate() ?>">
+                <input type="hidden" name="action" value="edit_customer">
+                <input type="hidden" name="customer_id" id="edit_customer_id">
+                
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold" id="editCustomerModalLabel"><i class="bi bi-pencil-square text-primary me-2"></i>Editar Cliente</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body bg-white rounded-bottom-4">
+                    <div class="mb-3">
+                        <label for="edit_customer_name" class="form-label fw-semibold" style="font-size:0.9rem;">Nome Fantasia / Identificação</label>
+                        <input type="text" class="form-control rounded-3" id="edit_customer_name" name="name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_customer_company" class="form-label fw-semibold" style="font-size:0.9rem;">Razão Social</label>
+                        <input type="text" class="form-control rounded-3" id="edit_customer_company" name="company_name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_customer_status" class="form-label fw-semibold" style="font-size:0.9rem;">Status</label>
+                        <select class="form-select rounded-3" id="edit_customer_status" name="status" required>
+                            <option value="1">Ativo</option>
+                            <option value="0">Inativo</option>
+                        </select>
+                    </div>
+                    <div class="p-3 bg-light rounded-3 border mb-3">
+                        <h6 class="fw-bold mb-3 border-bottom pb-2 text-secondary" style="font-size:0.85rem;"><i class="bi bi-shield-lock me-1"></i>Conta de Suporte do Cliente</h6>
+                        <div class="mb-2">
+                            <label for="edit_customer_login" class="form-label small fw-semibold">Login / Usuário</label>
+                            <input type="text" class="form-control form-control-sm rounded-2" id="edit_customer_login" name="support_login" placeholder="E-mail ou nome de usuário de suporte">
+                        </div>
+                        <div>
+                            <label for="edit_customer_password" class="form-label small fw-semibold">Senha</label>
+                            <input type="text" class="form-control form-control-sm rounded-2" id="edit_customer_password" name="support_password" placeholder="Senha da conta de suporte">
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex gap-2 justify-content-end mt-4">
+                        <button type="button" class="btn btn-light rounded-3 px-4" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary rounded-3 px-4">Salvar Alterações</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 
 <!-- Bootstrap 5 Bundle with Popper -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -948,6 +1192,27 @@ if ($current_customer) {
             });
         }
         
+        // POPULATE EDIT CUSTOMER MODAL
+        const editCustomerModal = document.getElementById('editCustomerModal');
+        if (editCustomerModal) {
+            editCustomerModal.addEventListener('show.bs.modal', function(event) {
+                const button = event.relatedTarget;
+                const id = button.getAttribute('data-customer-id');
+                const name = button.getAttribute('data-customer-name');
+                const company = button.getAttribute('data-customer-company');
+                const status = button.getAttribute('data-customer-status');
+                const login = button.getAttribute('data-customer-login');
+                const password = button.getAttribute('data-customer-password');
+                
+                document.getElementById('edit_customer_id').value = id;
+                document.getElementById('edit_customer_name').value = name;
+                document.getElementById('edit_customer_company').value = company;
+                document.getElementById('edit_customer_status').value = status;
+                document.getElementById('edit_customer_login').value = login;
+                document.getElementById('edit_customer_password').value = password;
+            });
+        }
+
         // POPULATE DELETE MODAL
         const deleteAssetModal = document.getElementById('deleteAssetModal');
         if (deleteAssetModal) {
