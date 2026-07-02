@@ -19,7 +19,7 @@ $role_title = $is_admin ? 'Administrador' : 'Atendente';
 
 // Hard Block for Non-Administrators
 if (!$is_admin) {
-    Redirect::to('agent_dashboard.php?success=' . urlencode("Acesso negado: Página exclusiva para administradores."));
+    Redirect::to('tasks.php?success=' . urlencode("Acesso negado: Página exclusiva para administradores."));
     exit;
 }
 
@@ -361,103 +361,7 @@ foreach ($pivot_results as $row) {
 
 <div class="wrapper">
     <!-- Sidebar Navigation -->
-    <aside class="sidebar">
-        <div class="brand-section">
-            <a href="index.php" class="brand-logo">
-                <i class="bi bi-cpu text-primary"></i>
-                <span class="brand-title">SyncDesk</span>
-            </a>
-            <div class="tenant-card">
-                <div class="d-flex align-items-center gap-2">
-                    <i class="bi bi-building text-primary"></i>
-                    <div class="text-truncate" style="max-width: 140px;">Empresa Exemplo</div>
-                </div>
-                <i class="bi bi-chevron-expand text-muted"></i>
-            </div>
-        </div>
-
-        <ul class="sidebar-menu">
-            <li class="menu-item">
-                <a href="#" class="menu-link">
-                    <i class="bi bi-grid-1x2-fill"></i>
-                    <span>Dashboard</span>
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="#" class="menu-link">
-                    <i class="bi bi-chat-left-text"></i>
-                    <span>Atendimentos</span>
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="manage_assets.php" class="menu-link">
-                    <i class="bi bi-people"></i>
-                    <span>Clientes</span>
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="#" class="menu-link">
-                    <i class="bi bi-journal-text"></i>
-                    <span>Knowledge Base</span>
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="agent_dashboard.php" class="menu-link">
-                    <i class="bi bi-check2-square"></i>
-                    <span>Tarefas</span>
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="#" class="menu-link">
-                    <i class="bi bi-folder2"></i>
-                    <span>Projetos</span>
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="#" class="menu-link">
-                    <i class="bi bi-bar-chart"></i>
-                    <span>Relatórios</span>
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="#" class="menu-link d-flex justify-content-between align-items-center">
-                    <div class="d-flex align-items-center gap-2">
-                        <i class="bi bi-bell"></i>
-                        <span>Notificações</span>
-                    </div>
-                    <span class="badge bg-primary rounded-pill" style="font-size: 0.7rem;">12</span>
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="#" class="menu-link">
-                    <i class="bi bi-gear"></i>
-                    <span>Configurações</span>
-                </a>
-            </li>
-            
-            <?php if ($is_admin): ?>
-                <li class="menu-item">
-                    <a href="manage_customer_agents.php" class="menu-link active">
-                        <i class="bi bi-person-gear"></i>
-                        <span>Vincular Equipe</span>
-                    </a>
-                </li>
-            <?php endif; ?>
-        </ul>
-
-        <div class="sidebar-footer">
-            <div class="profile-avatar">
-                <?= strtoupper(substr($full_name, 0, 1)) ?>
-            </div>
-            <div class="profile-info">
-                <span class="profile-name" title="<?= $full_name ?>"><?= $full_name ?></span>
-                <span class="profile-role"><?= $role_title ?></span>
-            </div>
-            <a href="users/logout.php" class="ms-auto text-muted hover-white" title="Sair">
-                <i class="bi bi-box-arrow-right fs-5"></i>
-            </a>
-        </div>
-    </aside>
+    <?php require_once 'sidebar.php'; ?>
 
     <!-- Main Content Area -->
     <main class="main-content">
