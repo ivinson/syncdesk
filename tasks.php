@@ -208,13 +208,25 @@ if ($is_admin) {
 // TASK FILTERS AND STATS (Multitenant Logic)
 // ==========================================
 
+$my_tasks_only = (bool)Input::get('my_tasks');
+
 // Build basic WHERE conditions for filters (GET Requests)
 $where_clauses = [];
 $params = [];
 
 if (!$is_admin) {
-    $where_clauses[] = "t.assigned_to = ?";
-    $params[] = $user_id;
+    if ($my_tasks_only) {
+        $where_clauses[] = "t.assigned_to = ?";
+        $params[] = $user_id;
+    } else {
+        $where_clauses[] = "t.customer_id IN (SELECT customer_id FROM customer_agent WHERE user_id = ?)";
+        $params[] = $user_id;
+    }
+} else {
+    if ($my_tasks_only) {
+        $where_clauses[] = "t.assigned_to = ?";
+        $params[] = $user_id;
+    }
 }
 
 // Apply Priority Filter
@@ -238,16 +250,30 @@ if (count($where_clauses) > 0) {
 
 // 1. Task Counters (Kept global/total for user workload awareness)
 if ($is_admin) {
-    $cnt_all = $db->query("SELECT COUNT(*) AS total FROM tasks")->first()->total;
-    $cnt_pending = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'pending'")->first()->total;
-    $cnt_in_progress = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'in_progress'")->first()->total;
-    $cnt_completed = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'completed'")->first()->total;
+    if ($my_tasks_only) {
+        $cnt_all = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE assigned_to = ?", [$user_id])->first()->total;
+        $cnt_pending = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'pending' AND assigned_to = ?", [$user_id])->first()->total;
+        $cnt_in_progress = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'in_progress' AND assigned_to = ?", [$user_id])->first()->total;
+        $cnt_completed = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'completed' AND assigned_to = ?", [$user_id])->first()->total;
+    } else {
+        $cnt_all = $db->query("SELECT COUNT(*) AS total FROM tasks")->first()->total;
+        $cnt_pending = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'pending'")->first()->total;
+        $cnt_in_progress = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'in_progress'")->first()->total;
+        $cnt_completed = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'completed'")->first()->total;
+    }
     $cnt_customers = $db->query("SELECT COUNT(*) AS total FROM customers WHERE status = 1")->first()->total;
 } else {
-    $cnt_all = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE assigned_to = ?", [$user_id])->first()->total;
-    $cnt_pending = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE assigned_to = ? AND status = 'pending'", [$user_id])->first()->total;
-    $cnt_in_progress = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE assigned_to = ? AND status = 'in_progress'", [$user_id])->first()->total;
-    $cnt_completed = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE assigned_to = ? AND status = 'completed'", [$user_id])->first()->total;
+    if ($my_tasks_only) {
+        $cnt_all = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE assigned_to = ?", [$user_id])->first()->total;
+        $cnt_pending = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE assigned_to = ? AND status = 'pending'", [$user_id])->first()->total;
+        $cnt_in_progress = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE assigned_to = ? AND status = 'in_progress'", [$user_id])->first()->total;
+        $cnt_completed = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE assigned_to = ? AND status = 'completed'", [$user_id])->first()->total;
+    } else {
+        $cnt_all = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE customer_id IN (SELECT customer_id FROM customer_agent WHERE user_id = ?)", [$user_id])->first()->total;
+        $cnt_pending = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'pending' AND customer_id IN (SELECT customer_id FROM customer_agent WHERE user_id = ?)", [$user_id])->first()->total;
+        $cnt_in_progress = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'in_progress' AND customer_id IN (SELECT customer_id FROM customer_agent WHERE user_id = ?)", [$user_id])->first()->total;
+        $cnt_completed = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'completed' AND customer_id IN (SELECT customer_id FROM customer_agent WHERE user_id = ?)", [$user_id])->first()->total;
+    }
     $cnt_customers = $db->query("SELECT COUNT(DISTINCT customer_id) AS total FROM customer_agent WHERE user_id = ?", [$user_id])->first()->total;
 }
 
@@ -886,21 +912,33 @@ foreach ($assets_list as $asset) {
         <div class="table-container">
             <div class="table-header-row">
                 <div class="d-flex align-items-center gap-3">
+                    <?php
+                    $list_query = $_GET;
+                    unset($list_query['my_tasks']);
+                    $list_url = 'tasks.php' . (!empty($list_query) ? '?' . http_build_query($list_query) : '');
+
+                    $my_tasks_query = $_GET;
+                    $my_tasks_query['my_tasks'] = 1;
+                    $my_tasks_url = 'tasks.php?' . http_build_query($my_tasks_query);
+                    ?>
                     <ul class="nav nav-pills nav-fill bg-light p-1 rounded-3" style="font-size: 0.85rem; font-weight: 500;">
                         <li class="nav-item">
-                            <a class="nav-link active py-1 px-3 text-primary bg-white shadow-sm rounded-2" href="tasks.php">Lista</a>
+                            <a class="nav-link <?= !$my_tasks_only ? 'active text-primary bg-white shadow-sm rounded-2' : 'text-muted' ?> py-1 px-3" href="<?= $list_url ?>">Lista</a>
                         </li>
                         <li class="nav-item">
                             <a class="nav-link py-1 px-3 text-muted" href="#">Quadro</a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link py-1 px-3 text-muted" href="#">Minhas tarefas</a>
+                            <a class="nav-link <?= $my_tasks_only ? 'active text-primary bg-white shadow-sm rounded-2' : 'text-muted' ?> py-1 px-3" href="<?= $my_tasks_url ?>">Minhas tarefas</a>
                         </li>
                     </ul>
                 </div>
                 
                 <!-- Dynamic Filters Form -->
                 <form method="GET" action="" id="filterForm" class="d-flex gap-2">
+                    <?php if ($my_tasks_only): ?>
+                        <input type="hidden" name="my_tasks" value="1">
+                    <?php endif; ?>
                     <select name="priority" class="form-select form-select-sm rounded-3 border-light-subtle" style="width: 130px; font-size:0.85rem;" onchange="this.form.submit()">
                         <option value="">Prioridade (Todas)</option>
                         <option value="low" <?= Input::get('priority') == 'low' ? 'selected' : '' ?>>Baixa</option>
@@ -957,16 +995,23 @@ foreach ($assets_list as $asset) {
                                 <tr>
                                     <td><input type="checkbox" class="form-check-input"></td>
                                     <td>
-                                        <a href="#" class="task-title-link edit-task-trigger-link" 
-                                           data-bs-toggle="modal" 
-                                           data-bs-target="#editTaskModal"
-                                           data-task-id="<?= $task->id ?>"
-                                           data-task-title="<?= htmlspecialchars($task->title) ?>"
-                                           data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
-                                           data-task-priority="<?= $task->priority ?>"
-                                           data-task-status="<?= $task->status ?>"
-                                           data-task-customer-id="<?= $task->customer_id ?>"
-                                           data-task-assigned-to="<?= $task->assigned_to ?>"><?= htmlspecialchars($task->title) ?></a>
+                                        <?php 
+                                        $can_edit_task = $is_admin || ($task->assigned_to == $user_id);
+                                        if ($can_edit_task): 
+                                        ?>
+                                            <a href="#" class="task-title-link edit-task-trigger-link" 
+                                               data-bs-toggle="modal" 
+                                               data-bs-target="#editTaskModal"
+                                               data-task-id="<?= $task->id ?>"
+                                               data-task-title="<?= htmlspecialchars($task->title) ?>"
+                                               data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
+                                               data-task-priority="<?= $task->priority ?>"
+                                               data-task-status="<?= $task->status ?>"
+                                               data-task-customer-id="<?= $task->customer_id ?>"
+                                               data-task-assigned-to="<?= $task->assigned_to ?>"><?= htmlspecialchars($task->title) ?></a>
+                                        <?php else: ?>
+                                            <span class="fw-semibold text-dark"><?= htmlspecialchars($task->title) ?></span>
+                                        <?php endif; ?>
                                         <div class="task-meta">
                                             <span class="badge bg-light text-secondary border">#T-<?= $task->id ?></span>
                                             <span class="text-muted"><i class="bi bi-clock me-1"></i>Atualizado em: <?= date('d/m/Y H:i', strtotime($task->updated_at)) ?></span>
@@ -1004,7 +1049,7 @@ foreach ($assets_list as $asset) {
                                             <input type="hidden" name="csrf" value="<?= Token::generate() ?>">
                                             <input type="hidden" name="action" value="quick_status_update">
                                             <input type="hidden" name="task_id" value="<?= $task->id ?>">
-                                            <select name="status" class="form-select status-select <?= $status_class ?>" onchange="this.form.submit()">
+                                            <select name="status" class="form-select status-select <?= $status_class ?>" onchange="this.form.submit()" <?= !$can_edit_task ? 'disabled' : '' ?>>
                                                 <option value="pending" <?= $task->status == 'pending' ? 'selected' : '' ?>>Pendente</option>
                                                 <option value="in_progress" <?= $task->status == 'in_progress' ? 'selected' : '' ?>>Em andamento</option>
                                                 <option value="completed" <?= $task->status == 'completed' ? 'selected' : '' ?>>Concluído</option>
@@ -1017,30 +1062,36 @@ foreach ($assets_list as $asset) {
                                                 <i class="bi bi-three-dots-vertical"></i>
                                             </button>
                                             <ul class="dropdown-menu dropdown-menu-end" style="font-size: 0.85rem;">
-                                                <li>
-                                                    <a class="dropdown-item edit-task-btn" href="#" 
-                                                       data-bs-toggle="modal" 
-                                                       data-bs-target="#editTaskModal"
-                                                       data-task-id="<?= $task->id ?>"
-                                                       data-task-title="<?= htmlspecialchars($task->title) ?>"
-                                                       data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
-                                                       data-task-priority="<?= $task->priority ?>"
-                                                       data-task-status="<?= $task->status ?>"
-                                                       data-task-customer-id="<?= $task->customer_id ?>"
-                                                       data-task-assigned-to="<?= $task->assigned_to ?>">
-                                                        <i class="bi bi-pencil me-2"></i>Editar Tarefa
-                                                    </a>
-                                                </li>
-                                                <li><hr class="dropdown-divider"></li>
-                                                <li>
-                                                    <a class="dropdown-item text-danger delete-task-btn" href="#"
-                                                       data-bs-toggle="modal"
-                                                       data-bs-target="#deleteTaskModal"
-                                                       data-task-id="<?= $task->id ?>"
-                                                       data-task-title="<?= htmlspecialchars($task->title) ?>">
-                                                        <i class="bi bi-trash me-2"></i>Excluir
-                                                    </a>
-                                                </li>
+                                                <?php if ($can_edit_task): ?>
+                                                    <li>
+                                                        <a class="dropdown-item edit-task-btn" href="#" 
+                                                           data-bs-toggle="modal" 
+                                                           data-bs-target="#editTaskModal"
+                                                           data-task-id="<?= $task->id ?>"
+                                                           data-task-title="<?= htmlspecialchars($task->title) ?>"
+                                                           data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
+                                                           data-task-priority="<?= $task->priority ?>"
+                                                           data-task-status="<?= $task->status ?>"
+                                                           data-task-customer-id="<?= $task->customer_id ?>"
+                                                           data-task-assigned-to="<?= $task->assigned_to ?>">
+                                                            <i class="bi bi-pencil me-2"></i>Editar Tarefa
+                                                        </a>
+                                                    </li>
+                                                    <li><hr class="dropdown-divider"></li>
+                                                    <li>
+                                                        <a class="dropdown-item text-danger delete-task-btn" href="#"
+                                                           data-bs-toggle="modal"
+                                                           data-bs-target="#deleteTaskModal"
+                                                           data-task-id="<?= $task->id ?>"
+                                                           data-task-title="<?= htmlspecialchars($task->title) ?>">
+                                                            <i class="bi bi-trash me-2"></i>Excluir
+                                                        </a>
+                                                    </li>
+                                                <?php else: ?>
+                                                    <li>
+                                                        <span class="dropdown-item-text text-muted small"><i class="bi bi-lock me-2"></i>Sem permissão para editar</span>
+                                                    </li>
+                                                <?php endif; ?>
                                             </ul>
                                         </div>
                                     </td>
