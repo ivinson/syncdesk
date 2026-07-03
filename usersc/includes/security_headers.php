@@ -34,7 +34,10 @@ The x-frame-options header provides clickjacking protection by not allowing ifra
 helps prevent clickjacking by indicating to a browser that it should not render the page in a frame (or an iframe or object).
 */
 
-header("X-Frame-Options: SAMEORIGIN");
+$current_script = basename($_SERVER['SCRIPT_NAME'] ?? $_SERVER['PHP_SELF'] ?? '');
+if ($current_script !== 'client_portal.php') {
+    header("X-Frame-Options: SAMEORIGIN");
+}
 
 
 /*
