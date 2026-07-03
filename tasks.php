@@ -737,6 +737,7 @@ foreach ($assets_list as $asset) {
         .type-meta_bm { background-color: #eff6ff; color: #2563eb; }
         .type-n8n_workflow { background-color: #fdf2f8; color: #db2777; }
         .type-ia_instance { background-color: #faf5ff; color: #9333ea; }
+        .type-system { background-color: #f0fdf4; color: #16a34a; }
         .type-other { background-color: #f8fafc; color: #475569; }
 
         .settings-table {
@@ -1327,6 +1328,7 @@ foreach ($assets_list as $asset) {
                 if (asset.type === 'meta_bm') typeLabel = 'Meta Business Manager';
                 if (asset.type === 'n8n_workflow') typeLabel = 'Fluxo n8n';
                 if (asset.type === 'ia_instance') typeLabel = 'Instância de IA';
+                if (asset.type === 'system') typeLabel = 'Sistema';
                 if (asset.type === 'other') typeLabel = 'Outros Acessos';
                 
                 let settingsRows = '';

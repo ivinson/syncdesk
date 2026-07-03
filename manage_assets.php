@@ -66,7 +66,7 @@ if (Input::exists()) {
             
             $errors = [];
             if (empty($name)) $errors[] = "O nome do ativo é obrigatório.";
-            if (!in_array($type, ['meta_bm', 'n8n_workflow', 'ia_instance', 'other'])) $errors[] = "Tipo de ativo inválido.";
+            if (!in_array($type, ['meta_bm', 'n8n_workflow', 'ia_instance', 'system', 'other'])) $errors[] = "Tipo de ativo inválido.";
             
             if (empty($errors)) {
                 // Structure JSON settings
@@ -106,7 +106,7 @@ if (Input::exists()) {
             
             $errors = [];
             if (empty($name)) $errors[] = "O nome do ativo é obrigatório.";
-            if (!in_array($type, ['meta_bm', 'n8n_workflow', 'ia_instance', 'other'])) $errors[] = "Tipo de ativo inválido.";
+            if (!in_array($type, ['meta_bm', 'n8n_workflow', 'ia_instance', 'system', 'other'])) $errors[] = "Tipo de ativo inválido.";
             
             // Check authorization to edit this asset
             $asset_query = $db->query("SELECT * FROM assets WHERE id = ? AND customer_id = ?", [$asset_id, $current_customer->id]);
@@ -225,6 +225,29 @@ if (Input::exists()) {
                 } else {
                     $error_msg = implode("<br>", $errors);
                 }
+            } else {
+                $error_msg = "Cliente não encontrado ou permissão negada.";
+            }
+        }
+        
+        // 6. DELETE CUSTOMER
+        else if ($action === 'delete_customer') {
+            $cust_id = (int)Input::get('customer_id');
+            
+            if ($is_admin) {
+                $cust_query = $db->query("SELECT * FROM customers WHERE id = ?", [$cust_id]);
+            } else {
+                $cust_query = $db->query("
+                    SELECT c.* 
+                    FROM customers c 
+                    JOIN customer_agent ca ON c.id = ca.customer_id 
+                    WHERE c.id = ? AND ca.user_id = ?", [$cust_id, $user_id]);
+            }
+            
+            if ($cust_query->count() > 0) {
+                $customer_to_delete = $cust_query->first();
+                $db->query("DELETE FROM customers WHERE id = ?", [$cust_id]);
+                Redirect::to("manage_assets.php?success=" . urlencode("Cliente '{$customer_to_delete->name}' excluído com sucesso!"));
             } else {
                 $error_msg = "Cliente não encontrado ou permissão negada.";
             }
@@ -491,6 +514,7 @@ if ($current_customer) {
         .type-meta_bm { background-color: #eff6ff; color: #2563eb; }
         .type-n8n_workflow { background-color: #fdf2f8; color: #db2777; }
         .type-ia_instance { background-color: #faf5ff; color: #9333ea; }
+        .type-system { background-color: #f0fdf4; color: #16a34a; }
         .type-other { background-color: #f8fafc; color: #475569; }
 
         .settings-table {
@@ -562,6 +586,14 @@ if ($current_customer) {
                     </div>
                 </div>
                 <div class="d-flex gap-2">
+                    <button class="btn btn-outline-danger btn-sm px-3 rounded-3 d-inline-flex align-items-center gap-2 delete-customer-btn" 
+                            data-bs-toggle="modal" 
+                            data-bs-target="#deleteCustomerModal"
+                            data-customer-id="<?= $current_customer->id ?>"
+                            data-customer-name="<?= htmlspecialchars($current_customer->name) ?>"
+                            style="font-weight: 500;">
+                        <i class="bi bi-trash"></i> Excluir Cliente
+                    </button>
                     <button class="btn btn-outline-secondary btn-sm px-3 rounded-3 d-inline-flex align-items-center gap-2 edit-customer-btn" 
                             data-bs-toggle="modal" 
                             data-bs-target="#editCustomerModal"
@@ -598,6 +630,7 @@ if ($current_customer) {
                             if ($asset->type === 'meta_bm') $type_label = 'Meta Business Manager';
                             if ($asset->type === 'n8n_workflow') $type_label = 'Fluxo n8n';
                             if ($asset->type === 'ia_instance') $type_label = 'Instância de IA';
+                            if ($asset->type === 'system') $type_label = 'Sistema';
                             if ($asset->type === 'other') $type_label = 'Outros Acessos';
                             
                             $settings_arr = json_decode($asset->settings, true) ?: [];
@@ -694,18 +727,28 @@ if ($current_customer) {
                                         <h5 class="fw-bold mb-0 text-dark"><?= htmlspecialchars($cust->name) ?></h5>
                                         <span class="text-muted small"><?= htmlspecialchars($cust->company_name) ?></span>
                                     </div>
-                                    <button type="button" class="btn btn-outline-secondary btn-sm p-1 rounded-2 edit-customer-btn" 
-                                            data-bs-toggle="modal" 
-                                            data-bs-target="#editCustomerModal"
-                                            data-customer-id="<?= $cust->id ?>"
-                                            data-customer-name="<?= htmlspecialchars($cust->name) ?>"
-                                            data-customer-company="<?= htmlspecialchars($cust->company_name) ?>"
-                                            data-customer-status="<?= $cust->status ?>"
-                                            data-customer-login="<?= htmlspecialchars($cust->support_login ?? '') ?>"
-                                            data-customer-password="<?= htmlspecialchars($cust->support_password ?? '') ?>"
-                                            title="Editar Cliente">
-                                        <i class="bi bi-pencil" style="font-size: 0.85rem;"></i>
-                                    </button>
+                                    <div class="d-flex gap-1">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm p-1 rounded-2 edit-customer-btn" 
+                                                data-bs-toggle="modal" 
+                                                data-bs-target="#editCustomerModal"
+                                                data-customer-id="<?= $cust->id ?>"
+                                                data-customer-name="<?= htmlspecialchars($cust->name) ?>"
+                                                data-customer-company="<?= htmlspecialchars($cust->company_name) ?>"
+                                                data-customer-status="<?= $cust->status ?>"
+                                                data-customer-login="<?= htmlspecialchars($cust->support_login ?? '') ?>"
+                                                data-customer-password="<?= htmlspecialchars($cust->support_password ?? '') ?>"
+                                                title="Editar Cliente">
+                                            <i class="bi bi-pencil" style="font-size: 0.85rem;"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger btn-sm p-1 rounded-2 delete-customer-btn" 
+                                                data-bs-toggle="modal" 
+                                                data-bs-target="#deleteCustomerModal"
+                                                data-customer-id="<?= $cust->id ?>"
+                                                data-customer-name="<?= htmlspecialchars($cust->name) ?>"
+                                                title="Excluir Cliente">
+                                            <i class="bi bi-trash" style="font-size: 0.85rem;"></i>
+                                        </button>
+                                    </div>
                                 </div>
                                 
                                 <div class="mb-3 d-flex gap-2 flex-wrap">
@@ -766,6 +809,7 @@ if ($current_customer) {
                             <option value="meta_bm">Meta Business Manager</option>
                             <option value="n8n_workflow">Fluxo n8n</option>
                             <option value="ia_instance">Instância de IA</option>
+                            <option value="system">Sistema</option>
                             <option value="other">Outros Acessos (Notas/API)</option>
                         </select>
                     </div>
@@ -812,6 +856,7 @@ if ($current_customer) {
                             <option value="meta_bm">Meta Business Manager</option>
                             <option value="n8n_workflow">Fluxo n8n</option>
                             <option value="ia_instance">Instância de IA</option>
+                            <option value="system">Sistema</option>
                             <option value="other">Outros Acessos (Notas/API)</option>
                         </select>
                     </div>
@@ -967,6 +1012,36 @@ if ($current_customer) {
     </div>
 </div>
 
+<!-- ==========================================
+      MODAL: DELETE CUSTOMER CONFIRMATION
+     ========================================== -->
+<div class="modal fade" id="deleteCustomerModal" tabindex="-1" aria-labelledby="deleteCustomerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <form method="POST" action="">
+                <input type="hidden" name="csrf" value="<?= Token::generate() ?>">
+                <input type="hidden" name="action" value="delete_customer">
+                <input type="hidden" name="customer_id" id="delete_customer_id">
+                
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold text-danger" id="deleteCustomerModalLabel"><i class="bi bi-exclamation-triangle me-2"></i>Excluir Cliente</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body bg-white rounded-bottom-4 text-center">
+                    <p class="mb-3">Tem certeza que deseja excluir permanentemente o cliente:</p>
+                    <p class="fw-bold mb-2 text-dark" id="delete_customer_name"></p>
+                    <p class="text-danger small mb-4"><i class="bi bi-info-circle me-1"></i>Aviso: Todos os ativos e tarefas vinculados a este cliente serão excluídos permanentemente.</p>
+                    
+                    <div class="d-flex gap-2 justify-content-center">
+                        <button type="button" class="btn btn-light rounded-3 px-3" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-danger rounded-3 px-3">Sim, Excluir</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Bootstrap 5 Bundle with Popper -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
@@ -1025,6 +1100,20 @@ if ($current_customer) {
                 <div class="mb-2">
                     <label class="form-label small fw-semibold">Status do Agente</label>
                     <input type="text" class="form-control form-control-sm rounded-2" name="settings[status]" placeholder="Ex: active / maintenance">
+                </div>
+            `,
+            system: `
+                <div class="mb-2">
+                    <label class="form-label small fw-semibold">URL / Caminho do Sistema</label>
+                    <input type="text" class="form-control form-control-sm rounded-2" name="settings[url_path]" required placeholder="Ex: https://sistema.cliente.com ou C:\\Caminho\\Sistema">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small fw-semibold">Usuário / Login</label>
+                    <input type="text" class="form-control form-control-sm rounded-2" name="settings[username]" placeholder="Ex: admin / usuario@exemplo.com">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small fw-semibold">Senha</label>
+                    <input type="text" class="form-control form-control-sm rounded-2" name="settings[password]" placeholder="Senha de acesso">
                 </div>
             `,
             other: `
@@ -1123,6 +1212,19 @@ if ($current_customer) {
                 document.getElementById('edit_customer_status').value = status;
                 document.getElementById('edit_customer_login').value = login;
                 document.getElementById('edit_customer_password').value = password;
+            });
+        }
+        
+        // POPULATE DELETE CUSTOMER MODAL
+        const deleteCustomerModal = document.getElementById('deleteCustomerModal');
+        if (deleteCustomerModal) {
+            deleteCustomerModal.addEventListener('show.bs.modal', function(event) {
+                const button = event.relatedTarget;
+                const id = button.getAttribute('data-customer-id');
+                const name = button.getAttribute('data-customer-name');
+                
+                document.getElementById('delete_customer_id').value = id;
+                document.getElementById('delete_customer_name').textContent = name;
             });
         }
 
