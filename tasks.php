@@ -55,14 +55,48 @@ if (Input::exists()) {
                     if ($can_update) {
                         $db->query("UPDATE tasks SET status = ? WHERE id = ?", [$new_status, $task_id]);
                         $status_label = $new_status == 'pending' ? 'Pendente' : ($new_status == 'in_progress' ? 'Em andamento' : 'Concluído');
+                        
+                        if (Input::get('ajax')) {
+                            header('Content-Type: application/json');
+                            echo json_encode([
+                                'success' => true,
+                                'message' => "Status da tarefa #{$task_id} alterado para '{$status_label}'!"
+                            ]);
+                            exit;
+                        }
+                        
                         Redirect::to('tasks.php?success=' . urlencode("Status da tarefa #{$task_id} alterado para '{$status_label}'!"));
                     } else {
+                        if (Input::get('ajax')) {
+                            header('Content-Type: application/json');
+                            echo json_encode([
+                                'success' => false,
+                                'message' => "Erro: Você não tem permissão para atualizar esta tarefa."
+                            ]);
+                            exit;
+                        }
                         $error_msg = "Erro: Você não tem permissão para atualizar esta tarefa.";
                     }
                 } else {
+                    if (Input::get('ajax')) {
+                        header('Content-Type: application/json');
+                        echo json_encode([
+                            'success' => false,
+                            'message' => "Erro: Tarefa não encontrada."
+                        ]);
+                        exit;
+                    }
                     $error_msg = "Erro: Tarefa não encontrada.";
                 }
             } else {
+                if (Input::get('ajax')) {
+                    header('Content-Type: application/json');
+                    echo json_encode([
+                        'success' => false,
+                        'message' => "Erro: Status inválido informado."
+                    ]);
+                    exit;
+                }
                 $error_msg = "Erro: Status inválido informado.";
             }
         }
@@ -208,6 +242,7 @@ if ($is_admin) {
 // TASK FILTERS AND STATS (Multitenant Logic)
 // ==========================================
 
+$view = Input::get('view') === 'board' ? 'board' : 'list';
 $my_tasks_only = (bool)Input::get('my_tasks');
 
 // Build basic WHERE conditions for filters (GET Requests)
@@ -317,6 +352,18 @@ foreach ($assets_list as $asset) {
         'type' => $asset->type,
         'settings' => json_decode($asset->settings, true)
     ];
+}
+
+// Group tasks by status for the board view
+$tasks_by_status = [
+    'pending' => [],
+    'in_progress' => [],
+    'completed' => []
+];
+foreach ($tasks as $task) {
+    if (isset($tasks_by_status[$task->status])) {
+        $tasks_by_status[$task->status][] = $task;
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -789,6 +836,85 @@ foreach ($assets_list as $asset) {
             font-size: 0.9rem;
             font-weight: 500;
         }
+
+        /* Board / Kanban View Styles */
+        .board-column {
+            background-color: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 16px;
+            padding: 1.25rem;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .board-cards-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            min-height: 480px;
+            height: 100%;
+            transition: background-color 0.2s ease, border-color 0.2s ease;
+            border-radius: 12px;
+            padding: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .board-cards-container.drag-over {
+            background-color: #f1f5f9;
+            border: 2px dashed #cbd5e1;
+        }
+
+        .task-card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 1rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            user-select: none;
+        }
+
+        .task-card.priority-border-high {
+            border-left: 4px solid #ef4444 !important;
+        }
+
+        .task-card.priority-border-medium {
+            border-left: 4px solid #f59e0b !important;
+        }
+
+        .task-card.priority-border-low {
+            border-left: 4px solid #10b981 !important;
+        }
+
+        .task-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+            border-color: #cbd5e1;
+        }
+
+        .task-card:active {
+            cursor: grabbing;
+        }
+
+        .task-card-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            line-height: 1.4;
+            color: var(--text-main);
+        }
+
+        .text-truncate-2 {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;  
+            overflow: hidden;
+        }
+        
+        .board-column-header {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -915,192 +1041,496 @@ foreach ($assets_list as $asset) {
                     <?php
                     $list_query = $_GET;
                     unset($list_query['my_tasks']);
+                    unset($list_query['view']);
                     $list_url = 'tasks.php' . (!empty($list_query) ? '?' . http_build_query($list_query) : '');
+
+                    $board_query = $_GET;
+                    $board_query['view'] = 'board';
+                    $board_url = 'tasks.php?' . http_build_query($board_query);
 
                     $my_tasks_query = $_GET;
                     $my_tasks_query['my_tasks'] = 1;
+                    unset($my_tasks_query['view']);
                     $my_tasks_url = 'tasks.php?' . http_build_query($my_tasks_query);
+                    
+                    // Build clear filters url preserving view and my_tasks
+                    $clear_filters_query = [];
+                    if ($view === 'board') {
+                        $clear_filters_query['view'] = 'board';
+                    }
+                    if ($my_tasks_only) {
+                        $clear_filters_query['my_tasks'] = 1;
+                    }
+                    $clear_filters_url = 'tasks.php' . (!empty($clear_filters_query) ? '?' . http_build_query($clear_filters_query) : '');
                     ?>
                     <ul class="nav nav-pills nav-fill bg-light p-1 rounded-3" style="font-size: 0.85rem; font-weight: 500;">
                         <li class="nav-item">
-                            <a class="nav-link <?= !$my_tasks_only ? 'active text-primary bg-white shadow-sm rounded-2' : 'text-muted' ?> py-1 px-3" href="<?= $list_url ?>">Lista</a>
+                            <a class="nav-link <?= !$my_tasks_only && $view !== 'board' ? 'active text-primary bg-white shadow-sm rounded-2' : 'text-muted' ?> py-1 px-3" href="<?= $list_url ?>">Lista</a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link py-1 px-3 text-muted" href="#">Quadro</a>
+                            <a class="nav-link <?= $view === 'board' ? 'active text-primary bg-white shadow-sm rounded-2' : 'text-muted' ?> py-1 px-3" href="<?= $board_url ?>">Quadro</a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link <?= $my_tasks_only ? 'active text-primary bg-white shadow-sm rounded-2' : 'text-muted' ?> py-1 px-3" href="<?= $my_tasks_url ?>">Minhas tarefas</a>
+                            <a class="nav-link <?= $my_tasks_only && $view !== 'board' ? 'active text-primary bg-white shadow-sm rounded-2' : 'text-muted' ?> py-1 px-3" href="<?= $my_tasks_url ?>">Minhas tarefas</a>
                         </li>
                     </ul>
                 </div>
                 
                 <!-- Dynamic Filters Form -->
                 <form method="GET" action="" id="filterForm" class="d-flex gap-2">
-                    <?php if ($my_tasks_only): ?>
-                        <input type="hidden" name="my_tasks" value="1">
+                    <?php if ($view === 'board'): ?>
+                        <input type="hidden" name="view" value="board">
                     <?php endif; ?>
-                    <select name="priority" class="form-select form-select-sm rounded-3 border-light-subtle" style="width: 130px; font-size:0.85rem;" onchange="this.form.submit()">
+                    <select name="priority" class="form-select form-select-sm rounded-3 border-light-subtle" style="width: 130px; font-size:0.85rem;" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()">
                         <option value="">Prioridade (Todas)</option>
                         <option value="low" <?= Input::get('priority') == 'low' ? 'selected' : '' ?>>Baixa</option>
                         <option value="medium" <?= Input::get('priority') == 'medium' ? 'selected' : '' ?>>Média</option>
                         <option value="high" <?= Input::get('priority') == 'high' ? 'selected' : '' ?>>Alta</option>
                     </select>
-                    <select name="status" class="form-select form-select-sm rounded-3 border-light-subtle" style="width: 130px; font-size:0.85rem;" onchange="this.form.submit()">
-                        <option value="">Status (Todos)</option>
-                        <option value="pending" <?= Input::get('status') == 'pending' ? 'selected' : '' ?>>Pendente</option>
-                        <option value="in_progress" <?= Input::get('status') == 'in_progress' ? 'selected' : '' ?>>Em andamento</option>
-                        <option value="completed" <?= Input::get('status') == 'completed' ? 'selected' : '' ?>>Concluído</option>
-                    </select>
-                    <?php if (Input::get('priority') || Input::get('status')): ?>
-                        <a href="tasks.php" class="btn btn-outline-secondary btn-sm rounded-3 d-inline-flex align-items-center" title="Limpar Filtros">
+                    <?php if ($view !== 'board'): ?>
+                        <select name="status" class="form-select form-select-sm rounded-3 border-light-subtle" style="width: 130px; font-size:0.85rem;" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()">
+                            <option value="">Status (Todos)</option>
+                            <option value="pending" <?= Input::get('status') == 'pending' ? 'selected' : '' ?>>Pendente</option>
+                            <option value="in_progress" <?= Input::get('status') == 'in_progress' ? 'selected' : '' ?>>Em andamento</option>
+                            <option value="completed" <?= Input::get('status') == 'completed' ? 'selected' : '' ?>>Concluído</option>
+                        </select>
+                    <?php endif; ?>
+                    <div class="form-check form-switch d-flex align-items-center me-1">
+                        <input class="form-check-input me-1" type="checkbox" name="my_tasks" value="1" id="myTasksToggle" <?= $my_tasks_only ? 'checked' : '' ?> onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()">
+                        <label class="form-check-label small fw-semibold text-muted" for="myTasksToggle" style="font-size: 0.8rem; white-space: nowrap;">Apenas Minhas</label>
+                    </div>
+                    <?php if (Input::get('priority') || Input::get('status') || ($my_tasks_only && $view === 'board')): ?>
+                        <a href="<?= $clear_filters_url ?>" class="btn btn-outline-secondary btn-sm rounded-3 d-inline-flex align-items-center" title="Limpar Filtros">
                             <i class="bi bi-x-circle"></i>
                         </a>
                     <?php endif; ?>
                 </form>
             </div>
 
-            <div class="table-responsive">
-                <table class="table custom-table">
-                    <thead>
-                        <tr>
-                            <th width="40"><input type="checkbox" class="form-check-input"></th>
-                            <th>Tarefa</th>
-                            <th>Cliente</th>
-                            <th>Responsável</th>
-                            <th>Prioridade</th>
-                            <th>Status</th>
-                            <th width="50" class="text-end">Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if (empty($tasks)): ?>
-                            <tr>
-                                <td colspan="7" class="text-center py-5 text-muted">
-                                    <i class="bi bi-inbox fs-2 d-block mb-2"></i>
-                                    Nenhuma tarefa cadastrada ou correspondente aos filtros.
-                                </td>
-                            </tr>
-                        <?php else: ?>
-                            <?php foreach ($tasks as $task): 
-                                $agent_name = trim($task->fname . ' ' . $task->lname) ?: $task->agent_username;
-                                $agent_initials = strtoupper(substr($agent_name, 0, 1));
-                                
-                                $status_class = 'status-' . $task->status;
-                                $priority_class = 'priority-' . $task->priority;
-                                $priority_label = $task->priority == 'high' ? 'Alta' : ($task->priority == 'medium' ? 'Média' : 'Baixa');
-                                
-                                $cust_assets = isset($assets_by_customer[$task->customer_id]) ? $assets_by_customer[$task->customer_id] : [];
-                                $assets_json = json_encode($cust_assets);
-                            ?>
-                                <tr>
-                                    <td><input type="checkbox" class="form-check-input"></td>
-                                    <td>
-                                        <?php 
+            <?php if ($view === 'board'): ?>
+                <!-- Kanban Board View -->
+                <div class="row g-3 board-container mt-3">
+                    <!-- Column Pending -->
+                    <div class="col-lg-4 col-12">
+                        <div class="board-column">
+                            <div class="board-column-header d-flex justify-content-between align-items-center mb-2">
+                                <span class="status-select py-1 px-3 d-inline-block text-center rounded-3 status-pending" style="width: auto; font-size: 0.85rem; font-weight: 600;">
+                                    Pendente
+                                </span>
+                                <span class="badge bg-light text-dark border border-light-subtle rounded-pill px-2.5 py-1" style="font-size: 0.8rem;"><?= count($tasks_by_status['pending']) ?></span>
+                            </div>
+                            <div class="board-cards-container" data-status="pending">
+                                <?php if (empty($tasks_by_status['pending'])): ?>
+                                    <div class="no-tasks-placeholder text-center py-4 text-muted bg-white rounded-3 border border-dashed" style="font-size: 0.85rem;">
+                                        <i class="bi bi-inbox fs-4 d-block mb-1 text-secondary"></i>
+                                        Sem tarefas pendentes
+                                    </div>
+                                <?php else: ?>
+                                    <?php foreach ($tasks_by_status['pending'] as $task): 
+                                        $agent_name = trim($task->fname . ' ' . $task->lname) ?: $task->agent_username;
+                                        $agent_initials = strtoupper(substr($agent_name, 0, 1));
+                                        
+                                        $status_class = 'status-' . $task->status;
+                                        $priority_class = 'priority-' . $task->priority;
+                                        $priority_label = $task->priority == 'high' ? 'Alta' : ($task->priority == 'medium' ? 'Média' : 'Baixa');
                                         $can_edit_task = $is_admin || ($task->assigned_to == $user_id);
-                                        if ($can_edit_task): 
-                                        ?>
-                                            <a href="#" class="task-title-link edit-task-trigger-link" 
-                                               data-bs-toggle="modal" 
-                                               data-bs-target="#editTaskModal"
-                                               data-task-id="<?= $task->id ?>"
-                                               data-task-title="<?= htmlspecialchars($task->title) ?>"
-                                               data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
-                                               data-task-priority="<?= $task->priority ?>"
-                                               data-task-status="<?= $task->status ?>"
-                                               data-task-customer-id="<?= $task->customer_id ?>"
-                                               data-task-assigned-to="<?= $task->assigned_to ?>"><?= htmlspecialchars($task->title) ?></a>
-                                        <?php else: ?>
-                                            <span class="fw-semibold text-dark"><?= htmlspecialchars($task->title) ?></span>
-                                        <?php endif; ?>
-                                        <div class="task-meta">
-                                            <span class="badge bg-light text-secondary border">#T-<?= $task->id ?></span>
-                                            <span class="text-muted"><i class="bi bi-clock me-1"></i>Atualizado em: <?= date('d/m/Y H:i', strtotime($task->updated_at)) ?></span>
+                                        
+                                        $cust_assets = isset($assets_by_customer[$task->customer_id]) ? $assets_by_customer[$task->customer_id] : [];
+                                        $assets_json = json_encode($cust_assets);
+                                    ?>
+                                        <div class="task-card priority-border-<?= $task->priority ?>" 
+                                             draggable="<?= $can_edit_task ? 'true' : 'false' ?>"
+                                             data-bs-toggle="modal" 
+                                             data-bs-target="#editTaskModal"
+                                             data-task-id="<?= $task->id ?>"
+                                             data-task-title="<?= htmlspecialchars($task->title) ?>"
+                                             data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
+                                             data-task-priority="<?= $task->priority ?>"
+                                             data-task-status="<?= $task->status ?>"
+                                             data-task-customer-id="<?= $task->customer_id ?>"
+                                             data-task-assigned-to="<?= $task->assigned_to ?>"
+                                             style="cursor: pointer;">
+                                             
+
+                                                 
+                                                 
+
+                                             
+                                             <div class="task-card-title mb-2"><?= htmlspecialchars($task->title) ?></div>
+                                             
+                                             <?php if (!empty($task->description)): ?>
+                                                 <p class="text-muted mb-2 text-truncate-2" style="font-size: 0.8rem; line-height: 1.4;">
+                                                     <?= htmlspecialchars(mb_strimwidth($task->description, 0, 85, '...')) ?>
+                                                 </p>
+                                             <?php endif; ?>
+                                             
+                                             <div class="border-top pt-2 mt-2">
+                                                 <div class="mb-1 d-flex align-items-center justify-content-between">
+                                                     <div class="small fw-semibold text-muted" style="font-size: 0.75rem;">Cliente:</div>
+                                                     <div class="small text-end" onclick="event.stopPropagation();">
+                                                         <a href="#" class="customer-link fw-bold" 
+                                                            data-bs-toggle="modal" 
+                                                            data-bs-target="#customerAssetsModal"
+                                                            data-customer-name="<?= htmlspecialchars($task->customer_name) ?>"
+                                                            data-company-name="<?= htmlspecialchars($task->customer_company) ?>"
+                                                            data-assets='<?= htmlspecialchars($assets_json, ENT_QUOTES, 'UTF-8') ?>'
+                                                            style="font-size: 0.8rem;">
+                                                             <?= htmlspecialchars($task->customer_name) ?>
+                                                             <i class="bi bi-box-arrow-up-right" style="font-size: 0.7rem;"></i>
+                                                         </a>
+                                                         <div class="text-muted" style="font-size: 0.7rem;"><?= htmlspecialchars($task->customer_company) ?></div>
+                                                     </div>
+                                                 </div>
+                                                 
+                                                 <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top border-light-subtle">
+                                                     <div class="agent-badge">
+                                                         <div class="agent-avatar-small" title="<?= htmlspecialchars($agent_name) ?>" style="width: 20px; height: 20px; font-size: 0.65rem;">
+                                                             <?= $agent_initials ?>
+                                                         </div>
+                                                         <span class="small text-muted" style="font-size: 0.75rem;"><?= htmlspecialchars(explode(' ', $agent_name)[0]) ?></span>
+                                                     </div>
+                                                     <div class="d-flex align-items-center gap-2">
+                                                         <span class="priority-badge <?= $priority_class ?>" style="min-width: auto; padding: 0.15rem 0.4rem; font-size: 0.7rem;"><?= $priority_label ?></span>
+                                                         <span class="text-muted" style="font-size: 0.7rem;"><i class="bi bi-clock me-1"></i><?= date('d/m H:i', strtotime($task->updated_at)) ?></span>
+                                                     </div>
+                                                 </div>
+                                             </div>
                                         </div>
-                                    </td>
-                                    <td>
-                                        <a href="#" class="customer-link" 
-                                           data-bs-toggle="modal" 
-                                           data-bs-target="#customerAssetsModal"
-                                           data-customer-name="<?= htmlspecialchars($task->customer_name) ?>"
-                                           data-company-name="<?= htmlspecialchars($task->customer_company) ?>"
-                                           data-assets='<?= htmlspecialchars($assets_json, ENT_QUOTES, 'UTF-8') ?>'>
-                                            <?= htmlspecialchars($task->customer_name) ?>
-                                            <i class="bi bi-box-arrow-up-right" style="font-size: 0.75rem;"></i>
-                                        </a>
-                                        <a href="manage_assets.php?customer_id=<?= $task->customer_id ?>" class="text-muted ms-2" title="Gerenciar Ativos do Cliente">
-                                            <i class="bi bi-gear" style="font-size: 0.8rem;"></i>
-                                        </a>
-                                        <div class="text-muted" style="font-size: 0.75rem;"><?= htmlspecialchars($task->customer_company) ?></div>
-                                    </td>
-                                    <td>
-                                        <div class="agent-badge">
-                                            <div class="agent-avatar-small" title="<?= htmlspecialchars($agent_name) ?>">
-                                                <?= $agent_initials ?>
-                                            </div>
-                                            <span><?= htmlspecialchars($agent_name) ?></span>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Column In Progress -->
+                    <div class="col-lg-4 col-12">
+                        <div class="board-column">
+                            <div class="board-column-header d-flex justify-content-between align-items-center mb-2">
+                                <span class="status-select py-1 px-3 d-inline-block text-center rounded-3 status-in_progress" style="width: auto; font-size: 0.85rem; font-weight: 600;">
+                                    Em andamento
+                                </span>
+                                <span class="badge bg-light text-dark border border-light-subtle rounded-pill px-2.5 py-1" style="font-size: 0.8rem;"><?= count($tasks_by_status['in_progress']) ?></span>
+                            </div>
+                            <div class="board-cards-container" data-status="in_progress">
+                                <?php if (empty($tasks_by_status['in_progress'])): ?>
+                                    <div class="no-tasks-placeholder text-center py-4 text-muted bg-white rounded-3 border border-dashed" style="font-size: 0.85rem;">
+                                        <i class="bi bi-inbox fs-4 d-block mb-1 text-secondary"></i>
+                                        Sem tarefas em andamento
+                                    </div>
+                                <?php else: ?>
+                                    <?php foreach ($tasks_by_status['in_progress'] as $task): 
+                                        $agent_name = trim($task->fname . ' ' . $task->lname) ?: $task->agent_username;
+                                        $agent_initials = strtoupper(substr($agent_name, 0, 1));
+                                        
+                                        $status_class = 'status-' . $task->status;
+                                        $priority_class = 'priority-' . $task->priority;
+                                        $priority_label = $task->priority == 'high' ? 'Alta' : ($task->priority == 'medium' ? 'Média' : 'Baixa');
+                                        $can_edit_task = $is_admin || ($task->assigned_to == $user_id);
+                                        
+                                        $cust_assets = isset($assets_by_customer[$task->customer_id]) ? $assets_by_customer[$task->customer_id] : [];
+                                        $assets_json = json_encode($cust_assets);
+                                    ?>
+                                        <div class="task-card priority-border-<?= $task->priority ?>" 
+                                             draggable="<?= $can_edit_task ? 'true' : 'false' ?>"
+                                             data-bs-toggle="modal" 
+                                             data-bs-target="#editTaskModal"
+                                             data-task-id="<?= $task->id ?>"
+                                             data-task-title="<?= htmlspecialchars($task->title) ?>"
+                                             data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
+                                             data-task-priority="<?= $task->priority ?>"
+                                             data-task-status="<?= $task->status ?>"
+                                             data-task-customer-id="<?= $task->customer_id ?>"
+                                             data-task-assigned-to="<?= $task->assigned_to ?>"
+                                             style="cursor: pointer;">
+                                             
+
+                                                 
+                                                 
+
+                                             
+                                             <div class="task-card-title mb-2"><?= htmlspecialchars($task->title) ?></div>
+                                             
+                                             <?php if (!empty($task->description)): ?>
+                                                 <p class="text-muted mb-2 text-truncate-2" style="font-size: 0.8rem; line-height: 1.4;">
+                                                     <?= htmlspecialchars(mb_strimwidth($task->description, 0, 85, '...')) ?>
+                                                 </p>
+                                             <?php endif; ?>
+                                             
+                                             <div class="border-top pt-2 mt-2">
+                                                 <div class="mb-1 d-flex align-items-center justify-content-between">
+                                                     <div class="small fw-semibold text-muted" style="font-size: 0.75rem;">Cliente:</div>
+                                                     <div class="small text-end" onclick="event.stopPropagation();">
+                                                         <a href="#" class="customer-link fw-bold" 
+                                                            data-bs-toggle="modal" 
+                                                            data-bs-target="#customerAssetsModal"
+                                                            data-customer-name="<?= htmlspecialchars($task->customer_name) ?>"
+                                                            data-company-name="<?= htmlspecialchars($task->customer_company) ?>"
+                                                            data-assets='<?= htmlspecialchars($assets_json, ENT_QUOTES, 'UTF-8') ?>'
+                                                            style="font-size: 0.8rem;">
+                                                             <?= htmlspecialchars($task->customer_name) ?>
+                                                             <i class="bi bi-box-arrow-up-right" style="font-size: 0.7rem;"></i>
+                                                         </a>
+                                                         <div class="text-muted" style="font-size: 0.7rem;"><?= htmlspecialchars($task->customer_company) ?></div>
+                                                     </div>
+                                                 </div>
+                                                 
+                                                 <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top border-light-subtle">
+                                                     <div class="agent-badge">
+                                                         <div class="agent-avatar-small" title="<?= htmlspecialchars($agent_name) ?>" style="width: 20px; height: 20px; font-size: 0.65rem;">
+                                                             <?= $agent_initials ?>
+                                                         </div>
+                                                         <span class="small text-muted" style="font-size: 0.75rem;"><?= htmlspecialchars(explode(' ', $agent_name)[0]) ?></span>
+                                                     </div>
+                                                     <div class="d-flex align-items-center gap-2">
+                                                         <span class="priority-badge <?= $priority_class ?>" style="min-width: auto; padding: 0.15rem 0.4rem; font-size: 0.7rem;"><?= $priority_label ?></span>
+                                                         <span class="text-muted" style="font-size: 0.7rem;"><i class="bi bi-clock me-1"></i><?= date('d/m H:i', strtotime($task->updated_at)) ?></span>
+                                                     </div>
+                                                 </div>
+                                             </div>
                                         </div>
-                                    </td>
-                                    <td>
-                                        <span class="priority-badge <?= $priority_class ?>"><?= $priority_label ?></span>
-                                    </td>
-                                    <td>
-                                        <!-- Inline Quick Status Updater Form -->
-                                        <form method="POST" action="" class="d-inline">
-                                            <input type="hidden" name="csrf" value="<?= Token::generate() ?>">
-                                            <input type="hidden" name="action" value="quick_status_update">
-                                            <input type="hidden" name="task_id" value="<?= $task->id ?>">
-                                            <select name="status" class="form-select status-select <?= $status_class ?>" onchange="this.form.submit()" <?= !$can_edit_task ? 'disabled' : '' ?>>
-                                                <option value="pending" <?= $task->status == 'pending' ? 'selected' : '' ?>>Pendente</option>
-                                                <option value="in_progress" <?= $task->status == 'in_progress' ? 'selected' : '' ?>>Em andamento</option>
-                                                <option value="completed" <?= $task->status == 'completed' ? 'selected' : '' ?>>Concluído</option>
-                                            </select>
-                                        </form>
-                                    </td>
-                                    <td class="text-end">
-                                        <div class="dropdown">
-                                            <button class="btn btn-link text-muted p-0" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                                                <i class="bi bi-three-dots-vertical"></i>
-                                            </button>
-                                            <ul class="dropdown-menu dropdown-menu-end" style="font-size: 0.85rem;">
-                                                <?php if ($can_edit_task): ?>
-                                                    <li>
-                                                        <a class="dropdown-item edit-task-btn" href="#" 
-                                                           data-bs-toggle="modal" 
-                                                           data-bs-target="#editTaskModal"
-                                                           data-task-id="<?= $task->id ?>"
-                                                           data-task-title="<?= htmlspecialchars($task->title) ?>"
-                                                           data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
-                                                           data-task-priority="<?= $task->priority ?>"
-                                                           data-task-status="<?= $task->status ?>"
-                                                           data-task-customer-id="<?= $task->customer_id ?>"
-                                                           data-task-assigned-to="<?= $task->assigned_to ?>">
-                                                            <i class="bi bi-pencil me-2"></i>Editar Tarefa
-                                                        </a>
-                                                    </li>
-                                                    <li><hr class="dropdown-divider"></li>
-                                                    <li>
-                                                        <a class="dropdown-item text-danger delete-task-btn" href="#"
-                                                           data-bs-toggle="modal"
-                                                           data-bs-target="#deleteTaskModal"
-                                                           data-task-id="<?= $task->id ?>"
-                                                           data-task-title="<?= htmlspecialchars($task->title) ?>">
-                                                            <i class="bi bi-trash me-2"></i>Excluir
-                                                        </a>
-                                                    </li>
-                                                <?php else: ?>
-                                                    <li>
-                                                        <span class="dropdown-item-text text-muted small"><i class="bi bi-lock me-2"></i>Sem permissão para editar</span>
-                                                    </li>
-                                                <?php endif; ?>
-                                            </ul>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Column Completed -->
+                    <div class="col-lg-4 col-12">
+                        <div class="board-column">
+                            <div class="board-column-header d-flex justify-content-between align-items-center mb-2">
+                                <span class="status-select py-1 px-3 d-inline-block text-center rounded-3 status-completed" style="width: auto; font-size: 0.85rem; font-weight: 600;">
+                                    Concluído
+                                </span>
+                                <span class="badge bg-light text-dark border border-light-subtle rounded-pill px-2.5 py-1" style="font-size: 0.8rem;"><?= count($tasks_by_status['completed']) ?></span>
+                            </div>
+                            <div class="board-cards-container" data-status="completed">
+                                <?php if (empty($tasks_by_status['completed'])): ?>
+                                    <div class="no-tasks-placeholder text-center py-4 text-muted bg-white rounded-3 border border-dashed" style="font-size: 0.85rem;">
+                                        <i class="bi bi-inbox fs-4 d-block mb-1 text-secondary"></i>
+                                        Sem tarefas concluídas
+                                    </div>
+                                <?php else: ?>
+                                    <?php foreach ($tasks_by_status['completed'] as $task): 
+                                        $agent_name = trim($task->fname . ' ' . $task->lname) ?: $task->agent_username;
+                                        $agent_initials = strtoupper(substr($agent_name, 0, 1));
+                                        
+                                        $status_class = 'status-' . $task->status;
+                                        $priority_class = 'priority-' . $task->priority;
+                                        $priority_label = $task->priority == 'high' ? 'Alta' : ($task->priority == 'medium' ? 'Média' : 'Baixa');
+                                        $can_edit_task = $is_admin || ($task->assigned_to == $user_id);
+                                        
+                                        $cust_assets = isset($assets_by_customer[$task->customer_id]) ? $assets_by_customer[$task->customer_id] : [];
+                                        $assets_json = json_encode($cust_assets);
+                                    ?>
+                                        <div class="task-card priority-border-<?= $task->priority ?>" 
+                                             draggable="<?= $can_edit_task ? 'true' : 'false' ?>"
+                                             data-bs-toggle="modal" 
+                                             data-bs-target="#editTaskModal"
+                                             data-task-id="<?= $task->id ?>"
+                                             data-task-title="<?= htmlspecialchars($task->title) ?>"
+                                             data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
+                                             data-task-priority="<?= $task->priority ?>"
+                                             data-task-status="<?= $task->status ?>"
+                                             data-task-customer-id="<?= $task->customer_id ?>"
+                                             data-task-assigned-to="<?= $task->assigned_to ?>"
+                                             style="cursor: pointer;">
+                                             
+
+                                                 
+                                                 
+
+                                             
+                                             <div class="task-card-title mb-2"><?= htmlspecialchars($task->title) ?></div>
+                                             
+                                             <?php if (!empty($task->description)): ?>
+                                                 <p class="text-muted mb-2 text-truncate-2" style="font-size: 0.8rem; line-height: 1.4;">
+                                                     <?= htmlspecialchars(mb_strimwidth($task->description, 0, 85, '...')) ?>
+                                                 </p>
+                                             <?php endif; ?>
+                                             
+                                             <div class="border-top pt-2 mt-2">
+                                                 <div class="mb-1 d-flex align-items-center justify-content-between">
+                                                     <div class="small fw-semibold text-muted" style="font-size: 0.75rem;">Cliente:</div>
+                                                     <div class="small text-end" onclick="event.stopPropagation();">
+                                                         <a href="#" class="customer-link fw-bold" 
+                                                            data-bs-toggle="modal" 
+                                                            data-bs-target="#customerAssetsModal"
+                                                            data-customer-name="<?= htmlspecialchars($task->customer_name) ?>"
+                                                            data-company-name="<?= htmlspecialchars($task->customer_company) ?>"
+                                                            data-assets='<?= htmlspecialchars($assets_json, ENT_QUOTES, 'UTF-8') ?>'
+                                                            style="font-size: 0.8rem;">
+                                                             <?= htmlspecialchars($task->customer_name) ?>
+                                                             <i class="bi bi-box-arrow-up-right" style="font-size: 0.7rem;"></i>
+                                                         </a>
+                                                         <div class="text-muted" style="font-size: 0.7rem;"><?= htmlspecialchars($task->customer_company) ?></div>
+                                                     </div>
+                                                 </div>
+                                                 
+                                                 <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top border-light-subtle">
+                                                     <div class="agent-badge">
+                                                         <div class="agent-avatar-small" title="<?= htmlspecialchars($agent_name) ?>" style="width: 20px; height: 20px; font-size: 0.65rem;">
+                                                             <?= $agent_initials ?>
+                                                         </div>
+                                                         <span class="small text-muted" style="font-size: 0.75rem;"><?= htmlspecialchars(explode(' ', $agent_name)[0]) ?></span>
+                                                     </div>
+                                                     <div class="d-flex align-items-center gap-2">
+                                                         <span class="priority-badge <?= $priority_class ?>" style="min-width: auto; padding: 0.15rem 0.4rem; font-size: 0.7rem;"><?= $priority_label ?></span>
+                                                         <span class="text-muted" style="font-size: 0.7rem;"><i class="bi bi-clock me-1"></i><?= date('d/m H:i', strtotime($task->updated_at)) ?></span>
+                                                     </div>
+                                                 </div>
+                                             </div>
                                         </div>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            <?php else: ?>
+                <!-- Table List View -->
+                <div class="table-responsive">
+                    <table class="table custom-table">
+                        <thead>
+                            <tr>
+                                <th width="40"><input type="checkbox" class="form-check-input"></th>
+                                <th>Tarefa</th>
+                                <th>Cliente</th>
+                                <th>Responsável</th>
+                                <th>Prioridade</th>
+                                <th>Status</th>
+                                <th width="50" class="text-end">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($tasks)): ?>
+                                <tr>
+                                    <td colspan="7" class="text-center py-5 text-muted">
+                                        <i class="bi bi-inbox fs-2 d-block mb-2"></i>
+                                        Nenhuma tarefa cadastrada ou correspondente aos filtros.
                                     </td>
                                 </tr>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
+                            <?php else: ?>
+                                <?php foreach ($tasks as $task): 
+                                    $agent_name = trim($task->fname . ' ' . $task->lname) ?: $task->agent_username;
+                                    $agent_initials = strtoupper(substr($agent_name, 0, 1));
+                                    
+                                    $status_class = 'status-' . $task->status;
+                                    $priority_class = 'priority-' . $task->priority;
+                                    $priority_label = $task->priority == 'high' ? 'Alta' : ($task->priority == 'medium' ? 'Média' : 'Baixa');
+                                    
+                                    $cust_assets = isset($assets_by_customer[$task->customer_id]) ? $assets_by_customer[$task->customer_id] : [];
+                                    $assets_json = json_encode($cust_assets);
+                                ?>
+                                    <tr>
+                                        <td><input type="checkbox" class="form-check-input"></td>
+                                        <td>
+                                            <?php 
+                                            $can_edit_task = $is_admin || ($task->assigned_to == $user_id);
+                                            if ($can_edit_task): 
+                                            ?>
+                                                <a href="#" class="task-title-link edit-task-trigger-link" 
+                                                   data-bs-toggle="modal" 
+                                                   data-bs-target="#editTaskModal"
+                                                   data-task-id="<?= $task->id ?>"
+                                                   data-task-title="<?= htmlspecialchars($task->title) ?>"
+                                                   data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
+                                                   data-task-priority="<?= $task->priority ?>"
+                                                   data-task-status="<?= $task->status ?>"
+                                                   data-task-customer-id="<?= $task->customer_id ?>"
+                                                   data-task-assigned-to="<?= $task->assigned_to ?>"><?= htmlspecialchars($task->title) ?></a>
+                                            <?php else: ?>
+                                                <span class="fw-semibold text-dark"><?= htmlspecialchars($task->title) ?></span>
+                                            <?php endif; ?>
+                                            <div class="task-meta">
+                                                <span class="badge bg-light text-secondary border">#T-<?= $task->id ?></span>
+                                                <span class="text-muted"><i class="bi bi-clock me-1"></i>Atualizado em: <?= date('d/m/Y H:i', strtotime($task->updated_at)) ?></span>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <a href="#" class="customer-link" 
+                                               data-bs-toggle="modal" 
+                                               data-bs-target="#customerAssetsModal"
+                                               data-customer-name="<?= htmlspecialchars($task->customer_name) ?>"
+                                               data-company-name="<?= htmlspecialchars($task->customer_company) ?>"
+                                               data-assets='<?= htmlspecialchars($assets_json, ENT_QUOTES, 'UTF-8') ?>'>
+                                                <?= htmlspecialchars($task->customer_name) ?>
+                                                <i class="bi bi-box-arrow-up-right" style="font-size: 0.75rem;"></i>
+                                            </a>
+                                            <a href="manage_assets.php?customer_id=<?= $task->customer_id ?>" class="text-muted ms-2" title="Gerenciar Ativos do Cliente">
+                                                <i class="bi bi-gear" style="font-size: 0.8rem;"></i>
+                                            </a>
+                                            <div class="text-muted" style="font-size: 0.75rem;"><?= htmlspecialchars($task->customer_company) ?></div>
+                                        </td>
+                                        <td>
+                                            <div class="agent-badge">
+                                                <div class="agent-avatar-small" title="<?= htmlspecialchars($agent_name) ?>">
+                                                    <?= $agent_initials ?>
+                                                </div>
+                                                <span><?= htmlspecialchars($agent_name) ?></span>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="priority-badge <?= $priority_class ?>"><?= $priority_label ?></span>
+                                        </td>
+                                        <td>
+                                            <!-- Inline Quick Status Updater Form -->
+                                            <form method="POST" action="" class="d-inline">
+                                                <input type="hidden" name="csrf" value="<?= Token::generate() ?>">
+                                                <input type="hidden" name="action" value="quick_status_update">
+                                                <input type="hidden" name="task_id" value="<?= $task->id ?>">
+                                                <select name="status" class="form-select status-select <?= $status_class ?>" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()" <?= !$can_edit_task ? 'disabled' : '' ?>>
+                                                    <option value="pending" <?= $task->status == 'pending' ? 'selected' : '' ?>>Pendente</option>
+                                                    <option value="in_progress" <?= $task->status == 'in_progress' ? 'selected' : '' ?>>Em andamento</option>
+                                                    <option value="completed" <?= $task->status == 'completed' ? 'selected' : '' ?>>Concluído</option>
+                                                </select>
+                                            </form>
+                                        </td>
+                                        <td class="text-end">
+                                            <div class="dropdown">
+                                                <button class="btn btn-link text-muted p-0" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                                    <i class="bi bi-three-dots-vertical"></i>
+                                                </button>
+                                                <ul class="dropdown-menu dropdown-menu-end" style="font-size: 0.85rem;">
+                                                    <?php if ($can_edit_task): ?>
+                                                        <li>
+                                                            <a class="dropdown-item edit-task-btn" href="#" 
+                                                               data-bs-toggle="modal" 
+                                                               data-bs-target="#editTaskModal"
+                                                               data-task-id="<?= $task->id ?>"
+                                                               data-task-title="<?= htmlspecialchars($task->title) ?>"
+                                                               data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
+                                                               data-task-priority="<?= $task->priority ?>"
+                                                               data-task-status="<?= $task->status ?>"
+                                                               data-task-customer-id="<?= $task->customer_id ?>"
+                                                               data-task-assigned-to="<?= $task->assigned_to ?>">
+                                                                <i class="bi bi-pencil me-2"></i>Editar Tarefa
+                                                            </a>
+                                                        </li>
+                                                        <li><hr class="dropdown-divider"></li>
+                                                        <li>
+                                                            <a class="dropdown-item text-danger delete-task-btn" href="#"
+                                                               data-bs-toggle="modal"
+                                                               data-bs-target="#deleteTaskModal"
+                                                               data-task-id="<?= $task->id ?>"
+                                                               data-task-title="<?= htmlspecialchars($task->title) ?>">
+                                                                <i class="bi bi-trash me-2"></i>Excluir
+                                                            </a>
+                                                        </li>
+                                                    <?php else: ?>
+                                                        <li>
+                                                            <span class="dropdown-item-text text-muted small"><i class="bi bi-lock me-2"></i>Sem permissão para editar</span>
+                                                        </li>
+                                                    <?php endif; ?>
+                                                </ul>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
         </div>
     </main>
 </div>
@@ -1428,6 +1858,242 @@ foreach ($assets_list as $asset) {
                 assetsListContainer.appendChild(card);
             });
         });
+
+        // 4. TOAST NOTIFICATIONS SYSTEM
+        function showToast(message, type = 'success') {
+            let container = document.getElementById('toast-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'toast-container';
+                container.style.position = 'fixed';
+                container.style.top = '20px';
+                container.style.right = '20px';
+                container.style.zIndex = '9999';
+                container.style.display = 'flex';
+                container.style.flexDirection = 'column';
+                container.style.gap = '10px';
+                document.body.appendChild(container);
+            }
+            
+            const toast = document.createElement('div');
+            toast.className = `alert alert-${type} alert-dismissible fade show shadow-lg border-0`;
+            toast.style.margin = '0';
+            toast.style.borderRadius = '12px';
+            toast.style.minWidth = '300px';
+            toast.style.fontSize = '0.9rem';
+            toast.style.fontWeight = '500';
+            
+            const icon = type === 'success' ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill';
+            toast.innerHTML = `
+                <div class="d-flex align-items-center gap-2">
+                    <i class="bi ${icon}"></i>
+                    <div>${message}</div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close" style="padding: 1rem 0.75rem 1rem 0.5rem;"></button>
+            `;
+            
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                const bsAlert = bootstrap.Alert.getInstance(toast) || new bootstrap.Alert(toast);
+                bsAlert.close();
+            }, 4000);
+        }
+
+        // 5. ASYNC PAGE UPDATE (HTML Over-The-Wire)
+        async function updatePageContent(formData) {
+            const tableContainer = document.querySelector('.table-container');
+            const statsRow = document.querySelector('.stats-row');
+            
+            if (tableContainer) tableContainer.style.opacity = '0.6';
+            if (statsRow) statsRow.style.opacity = '0.6';
+            
+            const params = new URLSearchParams(formData);
+            if (!formData.has('my_tasks')) {
+                params.delete('my_tasks');
+            }
+            const url = 'tasks.php?' + params.toString();
+            
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Erro de conexão');
+                
+                const html = await response.text();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                
+                // Update stats row
+                const newStatsRow = doc.querySelector('.stats-row');
+                if (statsRow && newStatsRow) {
+                    statsRow.innerHTML = newStatsRow.innerHTML;
+                }
+                
+                // Update table/board container
+                const newTableContainer = doc.querySelector('.table-container');
+                if (tableContainer && newTableContainer) {
+                    tableContainer.innerHTML = newTableContainer.innerHTML;
+                }
+                
+                // Update browser URL
+                window.history.pushState(null, '', url);
+                
+                // Re-bind all dynamic events
+                initializeBoardEvents();
+            } catch (error) {
+                console.error(error);
+                showToast('Erro ao atualizar filtros.', 'danger');
+            } finally {
+                if (tableContainer) tableContainer.style.opacity = '1';
+                if (statsRow) statsRow.style.opacity = '1';
+            }
+        }
+
+        // 6. SILENT REFRESH OF COUNTS
+        async function refreshStatsAndBoard() {
+            try {
+                const response = await fetch(window.location.href);
+                const html = await response.text();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                
+                const statsRow = document.querySelector('.stats-row');
+                const newStatsRow = doc.querySelector('.stats-row');
+                if (statsRow && newStatsRow) {
+                    statsRow.innerHTML = newStatsRow.innerHTML;
+                }
+                
+                // Update column headers for board view
+                document.querySelectorAll('.board-column').forEach((col, idx) => {
+                    const newColHeader = doc.querySelectorAll('.board-column')[idx]?.querySelector('.board-column-header');
+                    if (newColHeader) {
+                        col.querySelector('.board-column-header').innerHTML = newColHeader.innerHTML;
+                    }
+                });
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        // 7. INITIALIZE BOARD DRAG & DROP EVENTS
+        function initializeBoardEvents() {
+            const cards = document.querySelectorAll('.task-card');
+            const containers = document.querySelectorAll('.board-cards-container');
+
+            cards.forEach(card => {
+                card.addEventListener('dragstart', (e) => {
+                    e.dataTransfer.setData('text/plain', card.getAttribute('data-task-id'));
+                    card.style.opacity = '0.4';
+                });
+
+                card.addEventListener('dragend', () => {
+                    card.style.opacity = '1';
+                });
+            });
+
+            containers.forEach(container => {
+                container.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    container.classList.add('drag-over');
+                });
+
+                container.addEventListener('dragleave', () => {
+                    container.classList.remove('drag-over');
+                });
+
+                container.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    container.classList.remove('drag-over');
+                    
+                    const taskId = e.dataTransfer.getData('text/plain');
+                    const newStatus = container.getAttribute('data-status');
+                    const card = document.querySelector(`.task-card[data-task-id="${taskId}"]`);
+                    
+                    if (card) {
+                        const currentStatus = card.getAttribute('data-task-status');
+                        if (currentStatus === newStatus) return; // No change
+                        
+                        // AJAX update for status change
+                        const formData = new FormData();
+                        formData.append('csrf', document.querySelector('input[name="csrf"]').value);
+                        formData.append('action', 'quick_status_update');
+                        formData.append('task_id', taskId);
+                        formData.append('status', newStatus);
+                        formData.append('ajax', '1');
+                        
+                        card.style.opacity = '0.5';
+                        
+                        fetch('tasks.php', {
+                            method: 'POST',
+                            body: formData
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                card.setAttribute('data-task-status', newStatus);
+                                container.appendChild(card);
+                                showToast(data.message, 'success');
+                                refreshStatsAndBoard();
+                            } else {
+                                showToast(data.message, 'danger');
+                                setTimeout(() => window.location.reload(), 1000);
+                            }
+                        })
+                        .catch(error => {
+                            console.error(error);
+                            showToast('Erro de rede ao atualizar status.', 'danger');
+                            setTimeout(() => window.location.reload(), 1000);
+                        })
+                        .finally(() => {
+                            card.style.opacity = '1';
+                        });
+                    }
+                });
+            });
+        }
+
+        // 8. INTERCEPT FILTER FORM SUBMISSION
+        document.addEventListener('submit', function(e) {
+            if (e.target && e.target.id === 'filterForm') {
+                e.preventDefault();
+                updatePageContent(new FormData(e.target));
+            }
+            
+            // Intercept Quick Status Update forms in the list table
+            if (e.target && e.target.classList.contains('d-inline') && e.target.querySelector('input[name="action"]')?.value === 'quick_status_update') {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                formData.append('ajax', '1');
+                
+                const tableContainer = document.querySelector('.table-container');
+                if (tableContainer) tableContainer.style.opacity = '0.6';
+                
+                fetch('tasks.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast(data.message, 'success');
+                        // Refresh the entire board/table silently
+                        const params = new URLSearchParams(window.location.search);
+                        updatePageContent(params);
+                    } else {
+                        showToast(data.message, 'danger');
+                    }
+                })
+                .catch(error => {
+                    console.error(error);
+                    showToast('Erro de rede ao atualizar status.', 'danger');
+                })
+                .finally(() => {
+                    if (tableContainer) tableContainer.style.opacity = '1';
+                });
+            }
+        });
+
+        // Initial event binding
+        initializeBoardEvents();
         
         function escapeHtml(text) {
             const map = {
