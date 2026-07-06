@@ -235,7 +235,7 @@ $sb_current_page = basename($_SERVER['PHP_SELF']);
         
         <!-- 5. Tarefas (Active - Renamed to tasks.php) -->
         <li class="menu-item">
-            <a href="tasks.php" class="menu-link <?= $sb_current_page == 'tasks.php' ? 'active' : '' ?>">
+            <a href="tasks.php" class="menu-link <?= ($sb_current_page == 'tasks.php' || $sb_current_page == 'kanban.php') ? 'active' : '' ?>">
                 <i class="bi bi-check2-square"></i>
                 <span>Tarefas</span>
             </a>
