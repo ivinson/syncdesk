@@ -338,7 +338,7 @@ foreach ($assets_list as $asset) {
     <style>
         :root {
             --sb-bg: #0b0f19;
-            --sb-active-bg: #2563eb;
+            --sb-active-bg: #e11d48;
             --sb-text: #94a3b8;
             --sb-active-text: #ffffff;
             --main-bg: #f8fafc;
@@ -636,7 +636,7 @@ foreach ($assets_list as $asset) {
 
         .customer-link {
             font-weight: 600;
-            color: #2563eb;
+            color: #e11d48;
             text-decoration: none;
             display: inline-flex;
             align-items: center;
@@ -706,9 +706,9 @@ foreach ($assets_list as $asset) {
         }
 
         .status-select.status-in_progress {
-            background-color: #eff6ff;
-            color: #2563eb;
-            border-color: #bfdbfe;
+            background-color: #f3e8ff;
+            color: #7c3aed;
+            border-color: #e9d5ff;
         }
 
         .status-select.status-completed {
@@ -760,7 +760,7 @@ foreach ($assets_list as $asset) {
             text-transform: uppercase;
         }
 
-        .type-meta_bm { background-color: #eff6ff; color: #2563eb; }
+        .type-meta_bm { background-color: #fff1f2; color: #e11d48; }
         .type-n8n_workflow { background-color: #fdf2f8; color: #db2777; }
         .type-ia_instance { background-color: #faf5ff; color: #9333ea; }
         .type-system { background-color: #f0fdf4; color: #16a34a; }

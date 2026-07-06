@@ -121,7 +121,7 @@ foreach ($pivot_results as $row) {
     <style>
         :root {
             --sb-bg: #0b0f19;
-            --sb-active-bg: #2563eb;
+            --sb-active-bg: #e11d48;
             --sb-text: #94a3b8;
             --sb-active-text: #ffffff;
             --main-bg: #f8fafc;

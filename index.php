@@ -21,61 +21,107 @@ $role_title = $is_admin ? 'Administrador' : 'Atendente';
 $db = DB::getInstance();
 
 // ==========================================
-// 1. DATA AGGREGATION & KPI CALCULATIONS
+// 1. DYNAMIC CUSTOMER FILTER & MULTITENANCY
 // ==========================================
 if ($is_admin) {
-    // Total active customers
-    $q_cust = $db->query("SELECT COUNT(*) as cnt FROM customers WHERE status = 1");
-    $cnt_customers = $q_cust->first()->cnt;
-    
-    // Total tasks
-    $q_tasks = $db->query("SELECT COUNT(*) as cnt FROM tasks");
-    $cnt_tasks = $q_tasks->first()->cnt;
-    
-    // Tasks completed
-    $q_tasks_comp = $db->query("SELECT COUNT(*) as cnt FROM tasks WHERE status = 'completed'");
-    $cnt_tasks_completed = $q_tasks_comp->first()->cnt;
-    
-    // Active tasks (pending + in_progress)
-    $q_tasks_active = $db->query("SELECT COUNT(*) as cnt FROM tasks WHERE status IN ('pending', 'in_progress')");
-    $cnt_tasks_active = $q_tasks_active->first()->cnt;
-    
-    // Total assets
-    $q_assets = $db->query("SELECT COUNT(*) as cnt FROM assets");
-    $cnt_assets = $q_assets->first()->cnt;
+    $allowed_customers = $db->query("SELECT * FROM customers WHERE status = 1 ORDER BY name ASC")->results();
 } else {
-    // Customers associated to agent
-    $q_cust = $db->query("SELECT COUNT(DISTINCT customer_id) as cnt FROM customer_agent WHERE user_id = ?", [$user_id]);
-    $cnt_customers = $q_cust->first()->cnt;
+    $allowed_customers = $db->query("
+        SELECT c.* 
+        FROM customers c
+        JOIN customer_agent ca ON c.id = ca.customer_id
+        WHERE ca.user_id = ? AND c.status = 1
+        ORDER BY c.name ASC
+    ", [$user_id])->results();
+}
+
+$selected_customer_id = (int)Input::get('customer_id');
+
+// Validate selected customer is authorized for this user session
+$is_valid_customer = false;
+if ($selected_customer_id > 0) {
+    foreach ($allowed_customers as $ac) {
+        if ((int)$ac->id === $selected_customer_id) {
+            $is_valid_customer = true;
+            break;
+        }
+    }
+    if (!$is_valid_customer) {
+        $selected_customer_id = 0; // Fallback to all
+    }
+}
+
+// ==========================================
+// 2. DATA AGGREGATION & KPI CALCULATIONS
+// ==========================================
+if ($is_admin) {
+    $cnt_customers = count($allowed_customers);
     
-    // Tasks assigned to agent
-    $q_tasks = $db->query("SELECT COUNT(*) as cnt FROM tasks WHERE assigned_to = ?", [$user_id]);
-    $cnt_tasks = $q_tasks->first()->cnt;
+    // Assets count
+    if ($selected_customer_id > 0) {
+        $q_assets = $db->query("SELECT COUNT(*) as cnt FROM assets WHERE customer_id = ?", [$selected_customer_id]);
+    } else {
+        $q_assets = $db->query("SELECT COUNT(*) as cnt FROM assets");
+    }
+    $cnt_assets = $q_assets->first()->cnt;
     
-    // Tasks completed
-    $q_tasks_comp = $db->query("SELECT COUNT(*) as cnt FROM tasks WHERE assigned_to = ? AND status = 'completed'", [$user_id]);
-    $cnt_tasks_completed = $q_tasks_comp->first()->cnt;
+    // Tasks counts
+    $task_where = "WHERE 1=1";
+    $task_params = [];
+    if ($selected_customer_id > 0) {
+        $task_where .= " AND customer_id = ?";
+        $task_params[] = $selected_customer_id;
+    }
     
-    // Active tasks
-    $q_tasks_active = $db->query("SELECT COUNT(*) as cnt FROM tasks WHERE assigned_to = ? AND status IN ('pending', 'in_progress')", [$user_id]);
-    $cnt_tasks_active = $q_tasks_active->first()->cnt;
+    $cnt_tasks = $db->query("SELECT COUNT(*) as cnt FROM tasks {$task_where}", $task_params)->first()->cnt;
+    $cnt_tasks_completed = $db->query("SELECT COUNT(*) as cnt FROM tasks {$task_where} AND status = 'completed'", $task_params)->first()->cnt;
+    $cnt_tasks_active = $db->query("SELECT COUNT(*) as cnt FROM tasks {$task_where} AND status IN ('pending', 'in_progress')", $task_params)->first()->cnt;
+} else {
+    $cnt_customers = count($allowed_customers);
     
-    // Total assets associated to agent's customers
-    $q_assets = $db->query("SELECT COUNT(*) as cnt FROM assets WHERE customer_id IN (SELECT customer_id FROM customer_agent WHERE user_id = ?)", [$user_id]);
+    $task_where = "WHERE assigned_to = ?";
+    $task_params = [$user_id];
+    if ($selected_customer_id > 0) {
+        $task_where .= " AND customer_id = ?";
+        $task_params[] = $selected_customer_id;
+    }
+    
+    $cnt_tasks = $db->query("SELECT COUNT(*) as cnt FROM tasks {$task_where}", $task_params)->first()->cnt;
+    $cnt_tasks_completed = $db->query("SELECT COUNT(*) as cnt FROM tasks {$task_where} AND status = 'completed'", $task_params)->first()->cnt;
+    $cnt_tasks_active = $db->query("SELECT COUNT(*) as cnt FROM tasks {$task_where} AND status IN ('pending', 'in_progress')", $task_params)->first()->cnt;
+    
+    // Assets count
+    if ($selected_customer_id > 0) {
+        $q_assets = $db->query("SELECT COUNT(*) as cnt FROM assets WHERE customer_id = ?", [$selected_customer_id]);
+    } else {
+        $q_assets = $db->query("SELECT COUNT(*) as cnt FROM assets WHERE customer_id IN (SELECT customer_id FROM customer_agent WHERE user_id = ?)", [$user_id]);
+    }
     $cnt_assets = $q_assets->first()->cnt;
 }
 
 $efficiency = $cnt_tasks > 0 ? round(($cnt_tasks_completed / $cnt_tasks) * 100) : 0;
 
 // ==========================================
-// 2. CHART DATA QUERIES
+// 3. CHART DATA QUERIES
 // ==========================================
 
 // Chart A: Status Doughnut
 if ($is_admin) {
-    $status_data = $db->query("SELECT status, COUNT(*) as cnt FROM tasks GROUP BY status")->results();
+    $status_where = "WHERE 1=1";
+    $status_params = [];
+    if ($selected_customer_id > 0) {
+        $status_where .= " AND customer_id = ?";
+        $status_params[] = $selected_customer_id;
+    }
+    $status_data = $db->query("SELECT status, COUNT(*) as cnt FROM tasks {$status_where} GROUP BY status", $status_params)->results();
 } else {
-    $status_data = $db->query("SELECT status, COUNT(*) as cnt FROM tasks WHERE assigned_to = ? GROUP BY status", [$user_id])->results();
+    $status_where = "WHERE assigned_to = ?";
+    $status_params = [$user_id];
+    if ($selected_customer_id > 0) {
+        $status_where .= " AND customer_id = ?";
+        $status_params[] = $selected_customer_id;
+    }
+    $status_data = $db->query("SELECT status, COUNT(*) as cnt FROM tasks {$status_where} GROUP BY status", $status_params)->results();
 }
 $status_counts = ['pending' => 0, 'in_progress' => 0, 'completed' => 0];
 foreach ($status_data as $row) {
@@ -84,15 +130,19 @@ foreach ($status_data as $row) {
 
 // Chart B: Workload/Distribution Bar
 if ($is_admin) {
-    // Admin: Tasks assigned per Agent
+    $bar_where = "WHERE u.active = 1";
+    $bar_params = [];
+    if ($selected_customer_id > 0) {
+        $bar_where .= " AND t.customer_id = ?";
+        $bar_params[] = $selected_customer_id;
+    }
     $bar_data = $db->query("
         SELECT u.fname, u.lname, u.username, COUNT(t.id) as cnt 
         FROM users u 
-        LEFT JOIN tasks t ON u.id = t.assigned_to 
-        WHERE u.active = 1
+        LEFT JOIN tasks t ON u.id = t.assigned_to {$bar_where}
         GROUP BY u.id 
         ORDER BY cnt DESC
-    ")->results();
+    ", $bar_params)->results();
     
     $bar_labels = [];
     $bar_values = [];
@@ -103,15 +153,20 @@ if ($is_admin) {
     }
     $bar_chart_title = 'Distribuição de Tarefas por Atendente';
 } else {
-    // Agent: Tasks per Customer
+    $bar_where = "WHERE t.assigned_to = ?";
+    $bar_params = [$user_id];
+    if ($selected_customer_id > 0) {
+        $bar_where .= " AND c.id = ?";
+        $bar_params[] = $selected_customer_id;
+    }
     $bar_data = $db->query("
         SELECT c.name as customer_name, COUNT(t.id) as cnt 
         FROM customers c 
         JOIN tasks t ON c.id = t.customer_id 
-        WHERE t.assigned_to = ?
+        {$bar_where}
         GROUP BY c.id
         ORDER BY cnt DESC
-    ", [$user_id])->results();
+    ", $bar_params)->results();
     
     $bar_labels = [];
     $bar_values = [];
@@ -122,28 +177,135 @@ if ($is_admin) {
     $bar_chart_title = 'Minhas Tarefas por Cliente';
 }
 
+// Chart C: Distribution by Customer/Company
+if ($is_admin) {
+    $cust_chart_where = "WHERE 1=1";
+    $cust_chart_params = [];
+    if ($selected_customer_id > 0) {
+        $cust_chart_where .= " AND t.customer_id = ?";
+        $cust_chart_params[] = $selected_customer_id;
+    }
+    $cust_chart_data = $db->query("
+        SELECT c.name as customer_name, COUNT(t.id) as cnt 
+        FROM tasks t
+        JOIN customers c ON t.customer_id = c.id
+        {$cust_chart_where}
+        GROUP BY t.customer_id, c.name
+        ORDER BY cnt DESC
+    ", $cust_chart_params)->results();
+} else {
+    $cust_chart_where = "WHERE t.assigned_to = ?";
+    $cust_chart_params = [$user_id];
+    if ($selected_customer_id > 0) {
+        $cust_chart_where .= " AND t.customer_id = ?";
+        $cust_chart_params[] = $selected_customer_id;
+    }
+    $cust_chart_data = $db->query("
+        SELECT c.name as customer_name, COUNT(t.id) as cnt 
+        FROM tasks t
+        JOIN customers c ON t.customer_id = c.id
+        {$cust_chart_where}
+        GROUP BY t.customer_id, c.name
+        ORDER BY cnt DESC
+    ", $cust_chart_params)->results();
+}
+
+$cust_chart_labels = [];
+$cust_chart_values = [];
+foreach ($cust_chart_data as $row) {
+    $cust_chart_labels[] = $row->customer_name;
+    $cust_chart_values[] = (int)$row->cnt;
+}
+
+// Chart D: 7-Day Evolution of Opened/Created Tickets
+if ($is_admin) {
+    $line_where = "WHERE t.created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)";
+    $line_params = [];
+    if ($selected_customer_id > 0) {
+        $line_where .= " AND t.customer_id = ?";
+        $line_params[] = $selected_customer_id;
+    }
+    $line_data = $db->query("
+        SELECT DATE(t.created_at) as date_created, COUNT(t.id) as cnt 
+        FROM tasks t
+        {$line_where}
+        GROUP BY DATE(t.created_at)
+        ORDER BY DATE(t.created_at) ASC
+    ", $line_params)->results();
+} else {
+    $line_where = "WHERE t.assigned_to = ? AND t.created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)";
+    $line_params = [$user_id];
+    if ($selected_customer_id > 0) {
+        $line_where .= " AND t.customer_id = ?";
+        $line_params[] = $selected_customer_id;
+    }
+    $line_data = $db->query("
+        SELECT DATE(t.created_at) as date_created, COUNT(t.id) as cnt 
+        FROM tasks t
+        {$line_where}
+        GROUP BY DATE(t.created_at)
+        ORDER BY DATE(t.created_at) ASC
+    ", $line_params)->results();
+}
+
+// Pre-fill the last 7 days map to ensure clean continuous lines
+$line_map = [];
+for ($i = 6; $i >= 0; $i--) {
+    $d = date('Y-m-d', strtotime("-{$i} days"));
+    // Format e.g., "04/Jul" in Portuguese
+    $label = date('d/M', strtotime("-{$i} days"));
+    $line_map[$d] = ['label' => $label, 'count' => 0];
+}
+
+foreach ($line_data as $row) {
+    $d = $row->date_created;
+    if (isset($line_map[$d])) {
+        $line_map[$d]['count'] = (int)$row->cnt;
+    }
+}
+
+$line_labels = [];
+$line_values = [];
+foreach ($line_map as $date_key => $info) {
+    $line_labels[] = $info['label'];
+    $line_values[] = $info['count'];
+}
+
 // ==========================================
-// 3. RECENT TASKS LIST
+// 5. RECENT TASKS LIST (Filtered)
 // ==========================================
 if ($is_admin) {
+    $recent_where = "WHERE 1=1";
+    $recent_params = [];
+    if ($selected_customer_id > 0) {
+        $recent_where .= " AND t.customer_id = ?";
+        $recent_params[] = $selected_customer_id;
+    }
     $recent_tasks = $db->query("
         SELECT t.*, c.name as customer_name, u.fname, u.lname, u.username as agent_username
         FROM tasks t
         JOIN customers c ON t.customer_id = c.id
         LEFT JOIN users u ON t.assigned_to = u.id
+        {$recent_where}
         ORDER BY t.updated_at DESC, t.id DESC
         LIMIT 5
-    ")->results();
+    ", $recent_params)->results();
 } else {
+    $recent_where = "WHERE t.assigned_to = ?";
+    $recent_params = [$user_id];
+    if ($selected_customer_id > 0) {
+        $recent_where .= " AND t.customer_id = ?";
+        $recent_params[] = $selected_customer_id;
+    }
     $recent_tasks = $db->query("
         SELECT t.*, c.name as customer_name, u.fname, u.lname, u.username as agent_username
         FROM tasks t
         JOIN customers c ON t.customer_id = c.id
         LEFT JOIN users u ON t.assigned_to = u.id
-        WHERE t.assigned_to = ?
+        {$recent_where}
         ORDER BY t.updated_at DESC, t.id DESC
         LIMIT 5
-    ", [$user_id])->results();
+    ", $recent_params)->results();
 }
 ?>
 <!DOCTYPE html>
@@ -164,7 +326,7 @@ if ($is_admin) {
     <style>
         :root {
             --sb-bg: #0b0f19;
-            --sb-active-bg: #2563eb;
+            --sb-active-bg: #e11d48;
             --sb-text: #94a3b8;
             --sb-active-text: #ffffff;
             --main-bg: #f8fafc;
@@ -236,7 +398,7 @@ if ($is_admin) {
             width: 32px;
             height: 32px;
             border-radius: 50%;
-            background-color: #3b82f6;
+            background-color: #e11d48;
             color: #ffffff;
             display: flex;
             align-items: center;
@@ -281,7 +443,7 @@ if ($is_admin) {
             font-size: 1.25rem;
         }
 
-        .kpi-icon-blue { background: #eff6ff; color: #2563eb; }
+        .kpi-icon-blue { background: #fff1f2; color: #e11d48; }
         .kpi-icon-green { background: #f0fdf4; color: #16a34a; }
         .kpi-icon-orange { background: #fff7ed; color: #ea580c; }
         .kpi-icon-purple { background: #faf5ff; color: #9333ea; }
@@ -378,6 +540,31 @@ if ($is_admin) {
             <p class="text-muted">Bem-vindo ao painel tático do SyncDesk. Veja um resumo operacional.</p>
         </div>
 
+        <!-- Dynamic Customer Filter Bar (Multitenancy) -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="tactical-card" style="padding: 1rem 1.5rem;">
+                    <form method="GET" action="" id="dashboardFilterForm">
+                        <div class="row align-items-center g-2">
+                            <div class="col-auto">
+                                <label for="customer_id" class="col-form-label fw-semibold text-muted" style="font-size:0.85rem;">Filtrar por Cliente:</label>
+                            </div>
+                            <div class="col-sm-4 col-md-3">
+                                <select name="customer_id" id="customer_id" class="form-select form-select-sm" onchange="document.getElementById('dashboardFilterForm').submit()">
+                                    <option value="0"><?= $is_admin ? 'Todos os Clientes' : 'Todos os meus Clientes' ?></option>
+                                    <?php foreach ($allowed_customers as $ac): ?>
+                                        <option value="<?= $ac->id ?>" <?= $ac->id == $selected_customer_id ? 'selected' : '' ?>>
+                                            <?= htmlspecialchars($ac->name) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
         <!-- 4 KPI Metrics Row -->
         <div class="row g-3 mb-4">
             <!-- 1. Clientes Ativos -->
@@ -432,8 +619,8 @@ if ($is_admin) {
 
         <!-- Charts and Graphs Section -->
         <div class="row g-4 mb-4">
-            <!-- Doughnut Chart: Task Status -->
-            <div class="col-lg-4 col-md-12">
+            <!-- Doughnut Chart 1: Task Status -->
+            <div class="col-lg-6 col-md-12">
                 <div class="tactical-card">
                     <h5 class="fw-bold mb-3"><i class="bi bi-pie-chart me-2 text-primary"></i>Status das Tarefas</h5>
                     <div class="chart-container">
@@ -442,12 +629,32 @@ if ($is_admin) {
                 </div>
             </div>
             
-            <!-- Bar Chart: Workload Allocation -->
-            <div class="col-lg-8 col-md-12">
+            <!-- Bar Chart 2: Workload Allocation -->
+            <div class="col-lg-6 col-md-12">
                 <div class="tactical-card">
                     <h5 class="fw-bold mb-3"><i class="bi bi-bar-chart-steps me-2 text-primary"></i><?= $bar_chart_title ?></h5>
                     <div class="chart-container">
                         <canvas id="workloadChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Doughnut Chart 3: Customer Task Distribution -->
+            <div class="col-lg-6 col-md-12">
+                <div class="tactical-card">
+                    <h5 class="fw-bold mb-3"><i class="bi bi-building-check me-2 text-primary"></i>Demandas por Cliente</h5>
+                    <div class="chart-container">
+                        <canvas id="customerChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Line Chart 4: Historical 7-day evolution -->
+            <div class="col-lg-6 col-md-12">
+                <div class="tactical-card">
+                    <h5 class="fw-bold mb-3"><i class="bi bi-graph-up me-2 text-primary"></i>Evolução de Atendimentos (Últimos 7 dias)</h5>
+                    <div class="chart-container">
+                        <canvas id="evolutionChart"></canvas>
                     </div>
                 </div>
             </div>
@@ -544,9 +751,88 @@ if ($is_admin) {
             datasets: [{
                 label: 'Quantidade de tarefas',
                 data: <?= json_encode($bar_values) ?>,
-                backgroundColor: '#2563eb',
+                backgroundColor: '#e11d48',
                 borderRadius: 8,
                 maxBarThickness: 45
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        stepSize: 1,
+                        font: { size: 10, family: 'Inter' }
+                    },
+                    grid: {
+                        color: '#f1f5f9'
+                    }
+                },
+                x: {
+                    ticks: {
+                        font: { size: 10, family: 'Inter' }
+                    },
+                    grid: {
+                        display: false
+                    }
+                }
+            }
+        }
+    });
+
+    // 3. Customer Task Distribution Chart (Doughnut)
+    const ctxCustomer = document.getElementById('customerChart').getContext('2d');
+    const customerChart = new Chart(ctxCustomer, {
+        type: 'doughnut',
+        data: {
+            labels: <?= json_encode($cust_chart_labels) ?>,
+            datasets: [{
+                data: <?= json_encode($cust_chart_values) ?>,
+                backgroundColor: ['#e11d48', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#3f3f46', '#14b8a6'],
+                borderColor: ['#ffffff', '#ffffff', '#ffffff'],
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        boxWidth: 12,
+                        padding: 15,
+                        font: { size: 11, family: 'Inter' }
+                    }
+                }
+            },
+            cutout: '68%'
+        }
+    });
+
+    // 4. Historical 7-Day Evolution Chart (Line)
+    const ctxEvolution = document.getElementById('evolutionChart').getContext('2d');
+    const evolutionChart = new Chart(ctxEvolution, {
+        type: 'line',
+        data: {
+            labels: <?= json_encode($line_labels) ?>,
+            datasets: [{
+                label: 'Chamados Abertos',
+                data: <?= json_encode($line_values) ?>,
+                borderColor: '#e11d48',
+                backgroundColor: 'rgba(225, 29, 72, 0.05)',
+                borderWidth: 3,
+                tension: 0.3,
+                fill: true,
+                pointBackgroundColor: '#e11d48',
+                pointRadius: 4
             }]
         },
         options: {

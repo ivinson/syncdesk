@@ -305,7 +305,7 @@ if ($current_customer) {
     <style>
         :root {
             --sb-bg: #0b0f19;
-            --sb-active-bg: #2563eb;
+            --sb-active-bg: #e11d48;
             --sb-text: #94a3b8;
             --sb-active-text: #ffffff;
             --main-bg: #f8fafc;
@@ -511,7 +511,7 @@ if ($current_customer) {
             text-transform: uppercase;
         }
 
-        .type-meta_bm { background-color: #eff6ff; color: #2563eb; }
+        .type-meta_bm { background-color: #fff1f2; color: #e11d48; }
         .type-n8n_workflow { background-color: #fdf2f8; color: #db2777; }
         .type-ia_instance { background-color: #faf5ff; color: #9333ea; }
         .type-system { background-color: #f0fdf4; color: #16a34a; }
