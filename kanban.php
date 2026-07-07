@@ -278,6 +278,26 @@ if ($filter_status && in_array($filter_status, ['pending', 'in_progress', 'compl
     $params[] = $filter_status;
 }
 
+// Apply Customer Filter
+$filter_customer = Input::get('customer');
+if ($filter_customer !== null && $filter_customer !== '') {
+    $where_clauses[] = "t.customer_id = ?";
+    $params[] = (int)$filter_customer;
+}
+
+// Apply Date Range Filter (on t.created_at)
+$filter_start_date = Input::get('start_date');
+if ($filter_start_date !== null && $filter_start_date !== '') {
+    $where_clauses[] = "DATE(t.created_at) >= ?";
+    $params[] = $filter_start_date;
+}
+
+$filter_end_date = Input::get('end_date');
+if ($filter_end_date !== null && $filter_end_date !== '') {
+    $where_clauses[] = "DATE(t.created_at) <= ?";
+    $params[] = $filter_end_date;
+}
+
 $where_sql = "";
 if (count($where_clauses) > 0) {
     $where_sql = "WHERE " . implode(" AND ", $where_clauses);
@@ -915,6 +935,14 @@ foreach ($tasks as $task) {
             font-family: 'Outfit', sans-serif;
             font-weight: 600;
         }
+
+        .edit-task-btn {
+            color: #94a3b8;
+            transition: color 0.15s ease;
+        }
+        .edit-task-btn:hover {
+            color: #475569;
+        }
     </style>
 </head>
 <body>
@@ -932,13 +960,6 @@ foreach ($tasks as $task) {
                 <p class="text-muted mb-0 small">SyncDesk Operações</p>
             </div>
             <div class="d-flex align-items-center gap-3">
-                <!-- Apenas Minhas Toggle Form -->
-                <form method="GET" action="" id="filterForm" class="d-flex align-items-center me-2">
-                    <div class="form-check form-switch d-flex align-items-center mb-0">
-                        <input class="form-check-input me-1" type="checkbox" name="my_tasks" value="1" id="myTasksToggle" <?= $my_tasks_only ? 'checked' : '' ?> onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()">
-                        <label class="form-check-label small fw-semibold text-muted" for="myTasksToggle" style="font-size: 0.8rem; white-space: nowrap; user-select: none; cursor: pointer;">Apenas Minhas</label>
-                    </div>
-                </form>
                 <a href="tasks.php" class="btn btn-outline-secondary btn-sm px-3 rounded-3 d-inline-flex align-items-center gap-2" style="font-weight: 500;">
                     <i class="bi bi-arrow-left"></i> Voltar para Lista
                 </a>
@@ -946,6 +967,50 @@ foreach ($tasks as $task) {
                     <i class="bi bi-plus-lg"></i> Nova tarefa
                 </button>
             </div>
+        </div>
+
+        <!-- Dedicated Filter Bar Panel -->
+        <div class="card border border-light-subtle rounded-3 p-3 mb-4 bg-white shadow-sm">
+            <form method="GET" action="" id="filterForm" class="row g-3 align-items-end">
+                <!-- Customer Filter -->
+                <div class="col-md-3 col-sm-6">
+                    <label for="filter_customer" class="form-label small fw-semibold text-muted mb-1">Cliente</label>
+                    <select name="customer" id="filter_customer" class="form-select form-select-sm rounded-3" style="border-color: #cbd5e1;">
+                        <option value="">Todos os Clientes</option>
+                        <?php foreach ($available_customers as $cust): ?>
+                            <option value="<?= $cust->id ?>" <?= $filter_customer == $cust->id ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($cust->name) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                
+                <!-- Start Date Filter -->
+                <div class="col-md-3 col-sm-6">
+                    <label for="filter_start_date" class="form-label small fw-semibold text-muted mb-1">Data Início</label>
+                    <input type="date" name="start_date" id="filter_start_date" class="form-control form-control-sm rounded-3" style="border-color: #cbd5e1;" value="<?= htmlspecialchars($filter_start_date ?? '') ?>">
+                </div>
+                
+                <!-- End Date Filter -->
+                <div class="col-md-3 col-sm-6">
+                    <label for="filter_end_date" class="form-label small fw-semibold text-muted mb-1">Data Fim</label>
+                    <input type="date" name="end_date" id="filter_end_date" class="form-control form-control-sm rounded-3" style="border-color: #cbd5e1;" value="<?= htmlspecialchars($filter_end_date ?? '') ?>">
+                </div>
+                
+                <!-- My Tasks Switch & Clear Action -->
+                <div class="col-md-3 col-12 d-flex align-items-center gap-3 justify-content-md-end mt-3 mt-md-0">
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" name="my_tasks" value="1" id="myTasksToggle" <?= $my_tasks_only ? 'checked' : '' ?>>
+                        <label class="form-check-label small fw-semibold text-muted mb-0" for="myTasksToggle" style="user-select: none; cursor: pointer;">Apenas Minhas</label>
+                    </div>
+                    
+                    <?php if ($filter_customer || $filter_start_date || $filter_end_date || $my_tasks_only): ?>
+                        <a href="kanban.php" class="btn btn-outline-secondary btn-sm rounded-3 px-3">
+                            <i class="bi bi-x-circle me-1"></i>Limpar
+                        </a>
+                    <?php endif; ?>
+                </div>
+            </form>
         </div>
 
         <!-- Success & Error Alert Messages -->
@@ -993,8 +1058,6 @@ foreach ($tasks as $task) {
                                     ?>
                                         <div class="task-card priority-border-<?= $task->priority ?>" 
                                              draggable="<?= $can_edit_task ? 'true' : 'false' ?>"
-                                             data-bs-toggle="modal" 
-                                             data-bs-target="#editTaskModal"
                                              data-task-id="<?= $task->id ?>"
                                              data-task-title="<?= htmlspecialchars($task->title) ?>"
                                              data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
@@ -1004,44 +1067,51 @@ foreach ($tasks as $task) {
                                              data-task-assigned-to="<?= $task->assigned_to ?>"
                                              style="cursor: pointer;">
                                              
-                                             <div class="task-card-title mb-2"><?= htmlspecialchars($task->title) ?></div>
+                                             <!-- Top line: Client (Left) & Priority/Edit (Right) -->
+                                             <div class="d-flex align-items-center justify-content-between mb-2">
+                                                 <div onclick="event.stopPropagation();">
+                                                     <a href="#" class="customer-link fw-bold" 
+                                                        data-bs-toggle="modal" 
+                                                        data-bs-target="#customerAssetsModal"
+                                                        data-customer-name="<?= htmlspecialchars($task->customer_name) ?>"
+                                                        data-company-name="<?= htmlspecialchars($task->customer_company) ?>"
+                                                        data-assets='<?= htmlspecialchars($assets_json, ENT_QUOTES, 'UTF-8') ?>'
+                                                        style="font-size: 0.75rem;">
+                                                         <?= htmlspecialchars($task->customer_name) ?>
+                                                     </a>
+                                                 </div>
+                                                 <div class="d-flex align-items-center gap-2" onclick="event.stopPropagation();">
+                                                     <span class="priority-badge <?= $priority_class ?>" style="min-width: auto; padding: 0.15rem 0.4rem; font-size: 0.68rem;"><?= $priority_label ?></span>
+                                                     <button class="btn btn-link btn-sm p-0 edit-task-btn text-muted" 
+                                                             style="font-size: 0.85rem;"
+                                                             onclick="const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('editTaskModal')); modal.show(this.closest('.task-card'));"
+                                                             title="Editar Tarefa">
+                                                         <i class="bi bi-pencil-square"></i>
+                                                     </button>
+                                                 </div>
+                                             </div>
                                              
+                                             <!-- Task Title -->
+                                             <div class="task-card-title mb-1"><?= htmlspecialchars($task->title) ?></div>
+                                             
+                                             <!-- Collapsible Description -->
                                              <?php if (!empty($task->description)): ?>
-                                                 <p class="text-muted mb-2 text-truncate-2" style="font-size: 0.8rem; line-height: 1.4;">
-                                                     <?= htmlspecialchars(mb_strimwidth($task->description, 0, 85, '...')) ?>
-                                                 </p>
+                                                 <div class="task-desc-collapse collapse" id="desc-collapse-<?= $task->id ?>">
+                                                     <p class="text-muted mb-0 mt-2 pt-2 border-top" style="font-size: 0.8rem; line-height: 1.4; white-space: pre-line;">
+                                                         <?= htmlspecialchars($task->description) ?>
+                                                     </p>
+                                                 </div>
                                              <?php endif; ?>
                                              
-                                             <div class="border-top pt-2 mt-2">
-                                                 <div class="mb-1 d-flex align-items-center justify-content-between">
-                                                     <div class="small fw-semibold text-muted" style="font-size: 0.75rem;">Cliente:</div>
-                                                     <div class="small text-end" onclick="event.stopPropagation();">
-                                                         <a href="#" class="customer-link fw-bold" 
-                                                            data-bs-toggle="modal" 
-                                                            data-bs-target="#customerAssetsModal"
-                                                            data-customer-name="<?= htmlspecialchars($task->customer_name) ?>"
-                                                            data-company-name="<?= htmlspecialchars($task->customer_company) ?>"
-                                                            data-assets='<?= htmlspecialchars($assets_json, ENT_QUOTES, 'UTF-8') ?>'
-                                                            style="font-size: 0.8rem;">
-                                                             <?= htmlspecialchars($task->customer_name) ?>
-                                                             <i class="bi bi-box-arrow-up-right" style="font-size: 0.7rem;"></i>
-                                                         </a>
-                                                         <div class="text-muted" style="font-size: 0.7rem;"><?= htmlspecialchars($task->customer_company) ?></div>
+                                             <!-- Footer: Responsible (Left) & DateTime (Right) -->
+                                             <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top border-light-subtle">
+                                                 <div class="agent-badge">
+                                                     <div class="agent-avatar-small" title="<?= htmlspecialchars($agent_name) ?>" style="width: 20px; height: 20px; font-size: 0.65rem;">
+                                                         <?= $agent_initials ?>
                                                      </div>
+                                                     <span class="small text-muted" style="font-size: 0.72rem;"><?= htmlspecialchars(explode(' ', $agent_name)[0]) ?></span>
                                                  </div>
-                                                 
-                                                 <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top border-light-subtle">
-                                                     <div class="agent-badge">
-                                                         <div class="agent-avatar-small" title="<?= htmlspecialchars($agent_name) ?>" style="width: 20px; height: 20px; font-size: 0.65rem;">
-                                                             <?= $agent_initials ?>
-                                                         </div>
-                                                         <span class="small text-muted" style="font-size: 0.75rem;"><?= htmlspecialchars(explode(' ', $agent_name)[0]) ?></span>
-                                                     </div>
-                                                     <div class="d-flex align-items-center gap-2">
-                                                         <span class="priority-badge <?= $priority_class ?>" style="min-width: auto; padding: 0.15rem 0.4rem; font-size: 0.7rem;"><?= $priority_label ?></span>
-                                                         <span class="text-muted" style="font-size: 0.7rem;"><i class="bi bi-clock me-1"></i><?= date('d/m H:i', strtotime($task->updated_at)) ?></span>
-                                                     </div>
-                                                 </div>
+                                                 <span class="text-muted" style="font-size: 0.68rem;"><i class="bi bi-clock me-1"></i><?= date('d/m H:i', strtotime($task->updated_at)) ?></span>
                                              </div>
                                         </div>
                                     <?php endforeach; ?>
@@ -1079,8 +1149,6 @@ foreach ($tasks as $task) {
                                     ?>
                                         <div class="task-card priority-border-<?= $task->priority ?>" 
                                              draggable="<?= $can_edit_task ? 'true' : 'false' ?>"
-                                             data-bs-toggle="modal" 
-                                             data-bs-target="#editTaskModal"
                                              data-task-id="<?= $task->id ?>"
                                              data-task-title="<?= htmlspecialchars($task->title) ?>"
                                              data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
@@ -1090,44 +1158,51 @@ foreach ($tasks as $task) {
                                              data-task-assigned-to="<?= $task->assigned_to ?>"
                                              style="cursor: pointer;">
                                              
-                                             <div class="task-card-title mb-2"><?= htmlspecialchars($task->title) ?></div>
+                                             <!-- Top line: Client (Left) & Priority/Edit (Right) -->
+                                             <div class="d-flex align-items-center justify-content-between mb-2">
+                                                 <div onclick="event.stopPropagation();">
+                                                     <a href="#" class="customer-link fw-bold" 
+                                                        data-bs-toggle="modal" 
+                                                        data-bs-target="#customerAssetsModal"
+                                                        data-customer-name="<?= htmlspecialchars($task->customer_name) ?>"
+                                                        data-company-name="<?= htmlspecialchars($task->customer_company) ?>"
+                                                        data-assets='<?= htmlspecialchars($assets_json, ENT_QUOTES, 'UTF-8') ?>'
+                                                        style="font-size: 0.75rem;">
+                                                         <?= htmlspecialchars($task->customer_name) ?>
+                                                     </a>
+                                                 </div>
+                                                 <div class="d-flex align-items-center gap-2" onclick="event.stopPropagation();">
+                                                     <span class="priority-badge <?= $priority_class ?>" style="min-width: auto; padding: 0.15rem 0.4rem; font-size: 0.68rem;"><?= $priority_label ?></span>
+                                                     <button class="btn btn-link btn-sm p-0 edit-task-btn text-muted" 
+                                                             style="font-size: 0.85rem;"
+                                                             onclick="const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('editTaskModal')); modal.show(this.closest('.task-card'));"
+                                                             title="Editar Tarefa">
+                                                         <i class="bi bi-pencil-square"></i>
+                                                     </button>
+                                                 </div>
+                                             </div>
                                              
+                                             <!-- Task Title -->
+                                             <div class="task-card-title mb-1"><?= htmlspecialchars($task->title) ?></div>
+                                             
+                                             <!-- Collapsible Description -->
                                              <?php if (!empty($task->description)): ?>
-                                                 <p class="text-muted mb-2 text-truncate-2" style="font-size: 0.8rem; line-height: 1.4;">
-                                                     <?= htmlspecialchars(mb_strimwidth($task->description, 0, 85, '...')) ?>
-                                                 </p>
+                                                 <div class="task-desc-collapse collapse" id="desc-collapse-<?= $task->id ?>">
+                                                     <p class="text-muted mb-0 mt-2 pt-2 border-top" style="font-size: 0.8rem; line-height: 1.4; white-space: pre-line;">
+                                                         <?= htmlspecialchars($task->description) ?>
+                                                     </p>
+                                                 </div>
                                              <?php endif; ?>
                                              
-                                             <div class="border-top pt-2 mt-2">
-                                                 <div class="mb-1 d-flex align-items-center justify-content-between">
-                                                     <div class="small fw-semibold text-muted" style="font-size: 0.75rem;">Cliente:</div>
-                                                     <div class="small text-end" onclick="event.stopPropagation();">
-                                                         <a href="#" class="customer-link fw-bold" 
-                                                            data-bs-toggle="modal" 
-                                                            data-bs-target="#customerAssetsModal"
-                                                            data-customer-name="<?= htmlspecialchars($task->customer_name) ?>"
-                                                            data-company-name="<?= htmlspecialchars($task->customer_company) ?>"
-                                                            data-assets='<?= htmlspecialchars($assets_json, ENT_QUOTES, 'UTF-8') ?>'
-                                                            style="font-size: 0.8rem;">
-                                                             <?= htmlspecialchars($task->customer_name) ?>
-                                                             <i class="bi bi-box-arrow-up-right" style="font-size: 0.7rem;"></i>
-                                                         </a>
-                                                         <div class="text-muted" style="font-size: 0.7rem;"><?= htmlspecialchars($task->customer_company) ?></div>
+                                             <!-- Footer: Responsible (Left) & DateTime (Right) -->
+                                             <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top border-light-subtle">
+                                                 <div class="agent-badge">
+                                                     <div class="agent-avatar-small" title="<?= htmlspecialchars($agent_name) ?>" style="width: 20px; height: 20px; font-size: 0.65rem;">
+                                                         <?= $agent_initials ?>
                                                      </div>
+                                                     <span class="small text-muted" style="font-size: 0.72rem;"><?= htmlspecialchars(explode(' ', $agent_name)[0]) ?></span>
                                                  </div>
-                                                 
-                                                 <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top border-light-subtle">
-                                                     <div class="agent-badge">
-                                                         <div class="agent-avatar-small" title="<?= htmlspecialchars($agent_name) ?>" style="width: 20px; height: 20px; font-size: 0.65rem;">
-                                                             <?= $agent_initials ?>
-                                                         </div>
-                                                         <span class="small text-muted" style="font-size: 0.75rem;"><?= htmlspecialchars(explode(' ', $agent_name)[0]) ?></span>
-                                                     </div>
-                                                     <div class="d-flex align-items-center gap-2">
-                                                         <span class="priority-badge <?= $priority_class ?>" style="min-width: auto; padding: 0.15rem 0.4rem; font-size: 0.7rem;"><?= $priority_label ?></span>
-                                                         <span class="text-muted" style="font-size: 0.7rem;"><i class="bi bi-clock me-1"></i><?= date('d/m H:i', strtotime($task->updated_at)) ?></span>
-                                                     </div>
-                                                 </div>
+                                                 <span class="text-muted" style="font-size: 0.68rem;"><i class="bi bi-clock me-1"></i><?= date('d/m H:i', strtotime($task->updated_at)) ?></span>
                                              </div>
                                         </div>
                                     <?php endforeach; ?>
@@ -1165,8 +1240,6 @@ foreach ($tasks as $task) {
                                     ?>
                                         <div class="task-card priority-border-<?= $task->priority ?>" 
                                              draggable="<?= $can_edit_task ? 'true' : 'false' ?>"
-                                             data-bs-toggle="modal" 
-                                             data-bs-target="#editTaskModal"
                                              data-task-id="<?= $task->id ?>"
                                              data-task-title="<?= htmlspecialchars($task->title) ?>"
                                              data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
@@ -1176,44 +1249,51 @@ foreach ($tasks as $task) {
                                              data-task-assigned-to="<?= $task->assigned_to ?>"
                                              style="cursor: pointer;">
                                              
-                                             <div class="task-card-title mb-2"><?= htmlspecialchars($task->title) ?></div>
+                                             <!-- Top line: Client (Left) & Priority/Edit (Right) -->
+                                             <div class="d-flex align-items-center justify-content-between mb-2">
+                                                 <div onclick="event.stopPropagation();">
+                                                     <a href="#" class="customer-link fw-bold" 
+                                                        data-bs-toggle="modal" 
+                                                        data-bs-target="#customerAssetsModal"
+                                                        data-customer-name="<?= htmlspecialchars($task->customer_name) ?>"
+                                                        data-company-name="<?= htmlspecialchars($task->customer_company) ?>"
+                                                        data-assets='<?= htmlspecialchars($assets_json, ENT_QUOTES, 'UTF-8') ?>'
+                                                        style="font-size: 0.75rem;">
+                                                         <?= htmlspecialchars($task->customer_name) ?>
+                                                     </a>
+                                                 </div>
+                                                 <div class="d-flex align-items-center gap-2" onclick="event.stopPropagation();">
+                                                     <span class="priority-badge <?= $priority_class ?>" style="min-width: auto; padding: 0.15rem 0.4rem; font-size: 0.68rem;"><?= $priority_label ?></span>
+                                                     <button class="btn btn-link btn-sm p-0 edit-task-btn text-muted" 
+                                                             style="font-size: 0.85rem;"
+                                                             onclick="const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('editTaskModal')); modal.show(this.closest('.task-card'));"
+                                                             title="Editar Tarefa">
+                                                         <i class="bi bi-pencil-square"></i>
+                                                     </button>
+                                                 </div>
+                                             </div>
                                              
+                                             <!-- Task Title -->
+                                             <div class="task-card-title mb-1"><?= htmlspecialchars($task->title) ?></div>
+                                             
+                                             <!-- Collapsible Description -->
                                              <?php if (!empty($task->description)): ?>
-                                                 <p class="text-muted mb-2 text-truncate-2" style="font-size: 0.8rem; line-height: 1.4;">
-                                                     <?= htmlspecialchars(mb_strimwidth($task->description, 0, 85, '...')) ?>
-                                                 </p>
+                                                 <div class="task-desc-collapse collapse" id="desc-collapse-<?= $task->id ?>">
+                                                     <p class="text-muted mb-0 mt-2 pt-2 border-top" style="font-size: 0.8rem; line-height: 1.4; white-space: pre-line;">
+                                                         <?= htmlspecialchars($task->description) ?>
+                                                     </p>
+                                                 </div>
                                              <?php endif; ?>
                                              
-                                             <div class="border-top pt-2 mt-2">
-                                                 <div class="mb-1 d-flex align-items-center justify-content-between">
-                                                     <div class="small fw-semibold text-muted" style="font-size: 0.75rem;">Cliente:</div>
-                                                     <div class="small text-end" onclick="event.stopPropagation();">
-                                                         <a href="#" class="customer-link fw-bold" 
-                                                            data-bs-toggle="modal" 
-                                                            data-bs-target="#customerAssetsModal"
-                                                            data-customer-name="<?= htmlspecialchars($task->customer_name) ?>"
-                                                            data-company-name="<?= htmlspecialchars($task->customer_company) ?>"
-                                                            data-assets='<?= htmlspecialchars($assets_json, ENT_QUOTES, 'UTF-8') ?>'
-                                                            style="font-size: 0.8rem;">
-                                                             <?= htmlspecialchars($task->customer_name) ?>
-                                                             <i class="bi bi-box-arrow-up-right" style="font-size: 0.7rem;"></i>
-                                                         </a>
-                                                         <div class="text-muted" style="font-size: 0.7rem;"><?= htmlspecialchars($task->customer_company) ?></div>
+                                             <!-- Footer: Responsible (Left) & DateTime (Right) -->
+                                             <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top border-light-subtle">
+                                                 <div class="agent-badge">
+                                                     <div class="agent-avatar-small" title="<?= htmlspecialchars($agent_name) ?>" style="width: 20px; height: 20px; font-size: 0.65rem;">
+                                                         <?= $agent_initials ?>
                                                      </div>
+                                                     <span class="small text-muted" style="font-size: 0.72rem;"><?= htmlspecialchars(explode(' ', $agent_name)[0]) ?></span>
                                                  </div>
-                                                 
-                                                 <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top border-light-subtle">
-                                                     <div class="agent-badge">
-                                                         <div class="agent-avatar-small" title="<?= htmlspecialchars($agent_name) ?>" style="width: 20px; height: 20px; font-size: 0.65rem;">
-                                                             <?= $agent_initials ?>
-                                                         </div>
-                                                         <span class="small text-muted" style="font-size: 0.75rem;"><?= htmlspecialchars(explode(' ', $agent_name)[0]) ?></span>
-                                                     </div>
-                                                     <div class="d-flex align-items-center gap-2">
-                                                         <span class="priority-badge <?= $priority_class ?>" style="min-width: auto; padding: 0.15rem 0.4rem; font-size: 0.7rem;"><?= $priority_label ?></span>
-                                                         <span class="text-muted" style="font-size: 0.7rem;"><i class="bi bi-clock me-1"></i><?= date('d/m H:i', strtotime($task->updated_at)) ?></span>
-                                                     </div>
-                                                 </div>
+                                                 <span class="text-muted" style="font-size: 0.68rem;"><i class="bi bi-clock me-1"></i><?= date('d/m H:i', strtotime($task->updated_at)) ?></span>
                                              </div>
                                         </div>
                                     <?php endforeach; ?>
@@ -1691,6 +1771,31 @@ foreach ($tasks as $task) {
                 card.addEventListener('dragend', () => {
                     card.style.opacity = '1';
                 });
+
+                // Toggle description collapse on card click
+                card.addEventListener('click', (e) => {
+                    // Check if click was on link, button, or their children
+                    if (e.target.closest('a') || e.target.closest('button') || e.target.closest('.customer-link') || e.target.closest('.edit-task-btn')) {
+                        return;
+                    }
+                    const descCollapseEl = card.querySelector('.task-desc-collapse');
+                    if (descCollapseEl) {
+                        const bsCollapse = bootstrap.Collapse.getOrCreateInstance(descCollapseEl);
+                        bsCollapse.toggle();
+                    }
+                });
+
+                // Double click to edit task
+                card.addEventListener('dblclick', (e) => {
+                    if (e.target.closest('a') || e.target.closest('button') || e.target.closest('.customer-link')) {
+                        return;
+                    }
+                    const editModalEl = document.getElementById('editTaskModal');
+                    if (editModalEl) {
+                        const editModal = bootstrap.Modal.getOrCreateInstance(editModalEl);
+                        editModal.show(card);
+                    }
+                });
             });
 
             containers.forEach(container => {
@@ -1794,6 +1899,20 @@ foreach ($tasks as $task) {
                 });
             }
         });
+
+        // 9. AUTOMATIC SUBMIT ON FILTER CHANGE
+        const filterForm = document.getElementById('filterForm');
+        if (filterForm) {
+            filterForm.querySelectorAll('select, input').forEach(element => {
+                element.addEventListener('change', () => {
+                    if (filterForm.requestSubmit) {
+                        filterForm.requestSubmit();
+                    } else {
+                        filterForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                    }
+                });
+            });
+        }
 
         // Initial event binding
         initializeBoardEvents();
