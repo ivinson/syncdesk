@@ -108,6 +108,8 @@ if (Input::exists()) {
             $priority = Input::get('priority');
             $customer_id = (int)Input::get('customer_id');
             $assigned_to = $is_admin ? (int)Input::get('assigned_to') : $user_id;
+            $deadline = Input::get('deadline');
+            $deadline_val = !empty($deadline) ? $deadline : null;
             
             $errors = [];
             if (empty($title)) $errors[] = "O título é obrigatório.";
@@ -130,7 +132,8 @@ if (Input::exists()) {
                     'title' => $title,
                     'description' => $description,
                     'priority' => $priority,
-                    'status' => 'pending'
+                    'status' => 'pending',
+                    'deadline' => $deadline_val
                 ]);
                 Redirect::to('tasks.php?success=' . urlencode("Tarefa '{$title}' criada com sucesso!"));
             } else {
@@ -147,6 +150,8 @@ if (Input::exists()) {
             $status = Input::get('status');
             $customer_id = (int)Input::get('customer_id');
             $assigned_to = $is_admin ? (int)Input::get('assigned_to') : $user_id;
+            $deadline = Input::get('deadline');
+            $deadline_val = !empty($deadline) ? $deadline : null;
             
             $errors = [];
             if (empty($title)) $errors[] = "O título é obrigatório.";
@@ -176,8 +181,8 @@ if (Input::exists()) {
                     }
                     
                     if (empty($errors)) {
-                        $db->query("UPDATE tasks SET customer_id = ?, assigned_to = ?, title = ?, description = ?, priority = ?, status = ? WHERE id = ?", [
-                            $customer_id, $assigned_to, $title, $description, $priority, $status, $task_id
+                        $db->query("UPDATE tasks SET customer_id = ?, assigned_to = ?, title = ?, description = ?, priority = ?, status = ?, deadline = ? WHERE id = ?", [
+                            $customer_id, $assigned_to, $title, $description, $priority, $status, $deadline_val, $task_id
                         ]);
                         Redirect::to('tasks.php?success=' . urlencode("Tarefa #{$task_id} atualizada com sucesso!"));
                     } else {
@@ -1139,7 +1144,8 @@ foreach ($tasks as $task) {
                                                    data-task-priority="<?= $task->priority ?>"
                                                    data-task-status="<?= $task->status ?>"
                                                    data-task-customer-id="<?= $task->customer_id ?>"
-                                                   data-task-assigned-to="<?= $task->assigned_to ?>"><?= htmlspecialchars($task->title) ?></a>
+                                                   data-task-assigned-to="<?= $task->assigned_to ?>"
+                                                   data-task-deadline="<?= $task->deadline ?>"><?= htmlspecialchars($task->title) ?></a>
                                             <?php else: ?>
                                                 <span class="fw-semibold text-dark"><?= htmlspecialchars($task->title) ?></span>
                                             <?php endif; ?>
@@ -1204,7 +1210,8 @@ foreach ($tasks as $task) {
                                                                data-task-priority="<?= $task->priority ?>"
                                                                data-task-status="<?= $task->status ?>"
                                                                data-task-customer-id="<?= $task->customer_id ?>"
-                                                               data-task-assigned-to="<?= $task->assigned_to ?>">
+                                                               data-task-assigned-to="<?= $task->assigned_to ?>"
+                                                               data-task-deadline="<?= $task->deadline ?>">
                                                                 <i class="bi bi-pencil me-2"></i>Editar Tarefa
                                                             </a>
                                                         </li>
@@ -1279,6 +1286,10 @@ foreach ($tasks as $task) {
                             </select>
                         </div>
                     </div>
+                    <div class="mb-3">
+                        <label for="create_deadline" class="form-label fw-semibold" style="font-size:0.9rem;">Data Limite (Deadline) <span class="text-muted small fw-normal">(Opcional)</span></label>
+                        <input type="date" class="form-control rounded-3" id="create_deadline" name="deadline">
+                    </div>
                     
                     <?php if ($is_admin): ?>
                         <div class="mb-3">
@@ -1352,6 +1363,10 @@ foreach ($tasks as $task) {
                                 <option value="<?= $cust->id ?>"><?= htmlspecialchars($cust->name) ?></option>
                             <?php endforeach; ?>
                         </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_deadline" class="form-label fw-semibold" style="font-size:0.9rem;">Data Limite (Deadline) <span class="text-muted small fw-normal">(Opcional)</span></label>
+                        <input type="date" class="form-control rounded-3" id="edit_deadline" name="deadline">
                     </div>
                     
                     <?php if ($is_admin): ?>
@@ -1448,6 +1463,7 @@ foreach ($tasks as $task) {
             const status = button.getAttribute('data-task-status');
             const customerId = button.getAttribute('data-task-customer-id');
             const assignedTo = button.getAttribute('data-task-assigned-to');
+            const deadline = button.getAttribute('data-task-deadline');
             
             // Set input values
             document.getElementById('edit_task_id').value = id;
@@ -1456,6 +1472,7 @@ foreach ($tasks as $task) {
             document.getElementById('edit_priority').value = priority;
             document.getElementById('edit_status').value = status;
             document.getElementById('edit_customer_id').value = customerId;
+            document.getElementById('edit_deadline').value = deadline || '';
             
             // Check if element exists (only rendered for Admins)
             const agentSelect = document.getElementById('edit_assigned_to');
