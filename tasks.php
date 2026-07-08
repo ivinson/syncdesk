@@ -21,6 +21,18 @@ $is_admin = hasPerm([2], $user_id);
 $role_title = $is_admin ? 'Administrador' : 'Atendente';
 
 $db = DB::getInstance();
+
+// Auto-create task_comments table if not exists
+$db->query("CREATE TABLE IF NOT EXISTS `task_comments` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `task_id` INT NOT NULL,
+  `user_id` INT NOT NULL,
+  `comment` TEXT NOT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT `fk_tc_task` FOREIGN KEY (`task_id`) REFERENCES `tasks` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_tc_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
 $error_msg = "";
 $success_msg = "";
 
@@ -219,6 +231,119 @@ if (Input::exists()) {
             } else {
                 $error_msg = "Erro: Tarefa não encontrada.";
             }
+        }
+        
+        // 5. GET TASK COMMENTS (AJAX)
+        else if ($action === 'get_comments') {
+            $task_id = (int)Input::get('task_id');
+            
+            // Check access
+            $can_access = false;
+            if ($is_admin) {
+                $can_access = true;
+            } else {
+                $access_query = $db->query("SELECT id FROM tasks WHERE id = ? AND (assigned_to = ? OR customer_id IN (SELECT customer_id FROM customer_agent WHERE user_id = ?))", [$task_id, $user_id, $user_id]);
+                if ($access_query->count() > 0) {
+                    $can_access = true;
+                }
+            }
+            
+            header('Content-Type: application/json');
+            if ($can_access) {
+                $comments = $db->query("
+                    SELECT tc.*, u.fname, u.lname, u.username 
+                    FROM task_comments tc 
+                    JOIN users u ON tc.user_id = u.id 
+                    WHERE tc.task_id = ? 
+                    ORDER BY tc.created_at DESC
+                ", [$task_id])->results();
+                
+                // Format comments for response
+                $formatted_comments = [];
+                foreach ($comments as $c) {
+                    $name = trim($c->fname . ' ' . $c->lname) ?: $c->username;
+                    $initials = strtoupper(substr($name, 0, 1));
+                    $formatted_comments[] = [
+                        'id' => $c->id,
+                        'comment' => htmlspecialchars($c->comment),
+                        'user_name' => htmlspecialchars($name),
+                        'initials' => htmlspecialchars($initials),
+                        'created_at' => date('d/m/Y H:i', strtotime($c->created_at))
+                    ];
+                }
+                
+                echo json_encode([
+                    'success' => true,
+                    'comments' => $formatted_comments
+                ]);
+            } else {
+                echo json_encode([
+                    'success' => false,
+                    'message' => "Você não tem permissão para visualizar os comentários desta tarefa."
+                ]);
+            }
+            exit;
+        }
+        
+        // 6. ADD TASK COMMENT (AJAX)
+        else if ($action === 'add_comment') {
+            $task_id = (int)Input::get('task_id');
+            $comment_text = trim(Input::get('comment'));
+            
+            if (empty($comment_text)) {
+                header('Content-Type: application/json');
+                echo json_encode([
+                    'success' => false,
+                    'message' => "O comentário não pode ser vazio."
+                ]);
+                exit;
+            }
+            
+            // Check access
+            $can_access = false;
+            if ($is_admin) {
+                $can_access = true;
+            } else {
+                $access_query = $db->query("SELECT id FROM tasks WHERE id = ? AND (assigned_to = ? OR customer_id IN (SELECT customer_id FROM customer_agent WHERE user_id = ?))", [$task_id, $user_id, $user_id]);
+                if ($access_query->count() > 0) {
+                    $can_access = true;
+                }
+            }
+            
+            header('Content-Type: application/json');
+            if ($can_access) {
+                $db->query("INSERT INTO task_comments (task_id, user_id, comment) VALUES (?, ?, ?)", [$task_id, $user_id, $comment_text]);
+                
+                // Get the newly inserted comment details
+                $new_id = $db->query("SELECT LAST_INSERT_ID() AS last_id")->first()->last_id;
+                $new_comment_data = $db->query("
+                    SELECT tc.*, u.fname, u.lname, u.username 
+                    FROM task_comments tc 
+                    JOIN users u ON tc.user_id = u.id 
+                    WHERE tc.id = ?
+                ", [$new_id])->first();
+                
+                $name = trim($new_comment_data->fname . ' ' . $new_comment_data->lname) ?: $new_comment_data->username;
+                $initials = strtoupper(substr($name, 0, 1));
+                
+                echo json_encode([
+                    'success' => true,
+                    'message' => "Comentário adicionado com sucesso!",
+                    'comment' => [
+                        'id' => $new_comment_data->id,
+                        'comment' => htmlspecialchars($new_comment_data->comment),
+                        'user_name' => htmlspecialchars($name),
+                        'initials' => htmlspecialchars($initials),
+                        'created_at' => date('d/m/Y H:i', strtotime($new_comment_data->created_at))
+                    ]
+                ]);
+            } else {
+                echo json_encode([
+                    'success' => false,
+                    'message' => "Você não tem permissão para comentar nesta tarefa."
+                ]);
+            }
+            exit;
         }
     } else {
         $error_msg = "Erro: Validação de token CSRF falhou. Tente novamente.";
@@ -920,6 +1045,11 @@ foreach ($tasks as $task) {
             font-family: 'Outfit', sans-serif;
             font-weight: 600;
         }
+
+        /* Timeline custom styling */
+        .timeline-item:last-child .timeline-line {
+            display: none !important;
+        }
     </style>
 </head>
 <body>
@@ -959,6 +1089,9 @@ foreach ($tasks as $task) {
             <div class="d-flex gap-2">
                 <button class="btn btn-outline-secondary btn-sm px-3 rounded-3 d-inline-flex align-items-center gap-2" style="font-weight: 500;">
                     <i class="bi bi-download"></i> Exportar
+                </button>
+                <button class="btn btn-outline-primary btn-sm px-3 rounded-3 d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#bulkTaskModal" style="font-weight: 500;">
+                    <i class="bi bi-layers"></i> Adicionar em Lote
                 </button>
                 <button class="btn btn-primary btn-sm px-3 rounded-3 d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#createTaskModal" style="font-weight: 500;">
                     <i class="bi bi-plus-lg"></i> Nova tarefa
@@ -1146,13 +1279,25 @@ foreach ($tasks as $task) {
                                                    data-task-customer-id="<?= $task->customer_id ?>"
                                                    data-task-assigned-to="<?= $task->assigned_to ?>"
                                                    data-task-deadline="<?= $task->deadline ?>"><?= htmlspecialchars($task->title) ?></a>
+                                                <div class="task-meta">
+                                                    <span class="badge bg-light text-secondary border">#T-<?= $task->id ?></span>
+                                                    <?php if (!empty($task->deadline) && $task->deadline != '0000-00-00'): ?>
+                                                        <span class="text-muted"><i class="bi bi-calendar-event me-1"></i>Prazo: <?= date('d/m/Y', strtotime($task->deadline)) ?></span>
+                                                    <?php else: ?>
+                                                        <span class="text-muted"><i class="bi bi-calendar-event me-1"></i>Sem prazo</span>
+                                                    <?php endif; ?>
+                                                </div>
                                             <?php else: ?>
                                                 <span class="fw-semibold text-dark"><?= htmlspecialchars($task->title) ?></span>
+                                                <div class="task-meta">
+                                                 <span class="badge bg-light text-secondary border">#T-<?= $task->id ?></span>
+                                                 <?php if (!empty($task->deadline) && $task->deadline != '0000-00-00'): ?>
+                                                     <span class="text-muted"><i class="bi bi-calendar-event me-1"></i>Prazo: <?= date('d/m/Y', strtotime($task->deadline)) ?></span>
+                                                 <?php else: ?>
+                                                     <span class="text-muted"><i class="bi bi-calendar-event me-1"></i>Sem prazo</span>
+                                                 <?php endif; ?>
+                                             </div>
                                             <?php endif; ?>
-                                            <div class="task-meta">
-                                                <span class="badge bg-light text-secondary border">#T-<?= $task->id ?></span>
-                                                <span class="text-muted"><i class="bi bi-clock me-1"></i>Atualizado em: <?= date('d/m/Y H:i', strtotime($task->updated_at)) ?></span>
-                                            </div>
                                         </td>
                                         <td>
                                             <a href="#" class="customer-link" 
@@ -1167,7 +1312,6 @@ foreach ($tasks as $task) {
                                             <a href="manage_assets.php?customer_id=<?= $task->customer_id ?>" class="text-muted ms-2" title="Gerenciar Ativos do Cliente">
                                                 <i class="bi bi-gear" style="font-size: 0.8rem;"></i>
                                             </a>
-                                            <div class="text-muted" style="font-size: 0.75rem;"><?= htmlspecialchars($task->customer_company) ?></div>
                                         </td>
                                         <td>
                                             <div class="agent-badge">
@@ -1215,6 +1359,15 @@ foreach ($tasks as $task) {
                                                                 <i class="bi bi-pencil me-2"></i>Editar Tarefa
                                                             </a>
                                                         </li>
+                                                        <li>
+                                                            <a class="dropdown-item timeline-task-btn" href="#" 
+                                                               data-bs-toggle="modal" 
+                                                               data-bs-target="#taskTimelineModal"
+                                                               data-task-id="<?= $task->id ?>"
+                                                               data-task-title="<?= htmlspecialchars($task->title) ?>">
+                                                                <i class="bi bi-clock-history me-2"></i>Timeline
+                                                            </a>
+                                                        </li>
                                                         <li><hr class="dropdown-divider"></li>
                                                         <li>
                                                             <a class="dropdown-item text-danger delete-task-btn" href="#"
@@ -1226,6 +1379,16 @@ foreach ($tasks as $task) {
                                                             </a>
                                                         </li>
                                                     <?php else: ?>
+                                                        <li>
+                                                            <a class="dropdown-item timeline-task-btn" href="#" 
+                                                               data-bs-toggle="modal" 
+                                                               data-bs-target="#taskTimelineModal"
+                                                               data-task-id="<?= $task->id ?>"
+                                                               data-task-title="<?= htmlspecialchars($task->title) ?>">
+                                                                <i class="bi bi-clock-history me-2"></i>Timeline
+                                                            </a>
+                                                        </li>
+                                                        <li><hr class="dropdown-divider"></li>
                                                         <li>
                                                             <span class="dropdown-item-text text-muted small"><i class="bi bi-lock me-2"></i>Sem permissão para editar</span>
                                                         </li>
@@ -1437,6 +1600,94 @@ foreach ($tasks as $task) {
             <div class="modal-body">
                 <div id="modalAssetsList">
                     <!-- Dinamic Content Loaded via JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==========================================
+      MODAL: BULK TASK PLACEHOLDER (Bootstrap 5)
+     ========================================== -->
+<div class="modal fade" id="bulkTaskModal" tabindex="-1" aria-labelledby="bulkTaskModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" style="max-width: 400px;">
+        <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
+            <div class="modal-body text-center p-4">
+                <div class="d-flex justify-content-end">
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="my-3">
+                    <div class="d-inline-flex align-items-center justify-content-center bg-warning-subtle text-warning rounded-circle mb-3" style="width: 72px; height: 72px; font-size: 2.25rem;">
+                        <i class="bi bi-clock-history"></i>
+                    </div>
+                    <h4 class="fw-bold text-dark mb-2">Em breve</h4>
+                    <p class="text-muted mb-4 small px-2">
+                        A funcionalidade de criação de tarefas em lote está em desenvolvimento e estará disponível em breve para otimizar a sua gestão.
+                    </p>
+                    <button type="button" class="btn btn-primary w-100 rounded-3 py-2 fw-semibold" data-bs-dismiss="modal">
+                        Entendido
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==========================================
+      MODAL: TASK TIMELINE (Bootstrap 5)
+     ========================================== -->
+<div class="modal fade" id="taskTimelineModal" tabindex="-1" aria-labelledby="taskTimelineModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg" style="border-radius: 18px;">
+            <div class="modal-header border-bottom-0 pb-0 pt-4 px-4">
+                <div class="d-flex align-items-center">
+                    <div class="bg-primary-subtle text-primary rounded-circle p-2.5 me-3 d-inline-flex align-items-center justify-content-center" style="width: 48px; height: 48px; background-color: #eff6ff; color: #3b82f6;">
+                        <i class="bi bi-clock-history fs-4"></i>
+                    </div>
+                    <div>
+                        <h5 class="modal-title fw-bold text-dark mb-0" id="taskTimelineModalLabel">Timeline da Tarefa</h5>
+                        <p class="text-muted small mb-0" id="timelineTaskTitle" style="font-size: 0.85rem; font-weight: 500;"></p>
+                    </div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            
+            <div class="modal-body p-4">
+                <!-- Add Comment Box -->
+                <form id="addCommentForm" class="mb-4">
+                    <input type="hidden" name="csrf" id="timeline_csrf_token" value="<?= Token::generate() ?>">
+                    <input type="hidden" name="action" value="add_comment">
+                    <input type="hidden" name="task_id" id="timeline_task_id">
+                    <div class="mb-2">
+                        <textarea class="form-control rounded-3 border-light-subtle" name="comment" id="timeline_comment_text" rows="3" placeholder="Escreva uma atualização ou comentário sobre a tarefa..." style="font-size: 0.9rem;" required></textarea>
+                    </div>
+                    <div class="d-flex justify-content-end">
+                        <button type="submit" class="btn btn-primary btn-sm px-4 rounded-3 d-inline-flex align-items-center gap-2" id="btnSubmitComment" style="font-weight: 500;">
+                            <i class="bi bi-send-fill"></i> Enviar Comentário
+                        </button>
+                    </div>
+                </form>
+
+                <!-- Comments Timeline Section -->
+                <h6 class="fw-bold text-muted small mb-3 text-uppercase" style="letter-spacing: 0.05em; font-size: 0.72rem;">Histórico de Comentários</h6>
+                
+                <!-- Loading Spinner -->
+                <div id="timelineLoading" class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                        <span class="visually-hidden">Carregando...</span>
+                    </div>
+                    <p class="text-muted small mt-2 mb-0">Carregando histórico...</p>
+                </div>
+                
+                <!-- No Comments Placeholder -->
+                <div id="timelineEmpty" class="text-center py-4 text-muted rounded-3 border border-dashed bg-light mb-3" style="display: none; font-size: 0.85rem;">
+                    <i class="bi bi-chat-left-dots fs-3 d-block mb-1 text-secondary"></i>
+                    Nenhum comentário registrado ainda.
+                </div>
+
+                <!-- Timeline Scroll Container -->
+                <div id="timelineCommentsList" class="overflow-y-auto px-1" style="max-height: 350px; display: none;">
+                    <!-- Dynamically populated via JavaScript -->
                 </div>
             </div>
         </div>
@@ -1810,6 +2061,154 @@ foreach ($tasks as $task) {
                 });
             }
         });
+
+        // ==========================================
+        // TASK TIMELINE & COMMENTS LOGIC
+        // ==========================================
+        const taskTimelineModal = document.getElementById('taskTimelineModal');
+        const addCommentForm = document.getElementById('addCommentForm');
+        const timelineLoading = document.getElementById('timelineLoading');
+        const timelineEmpty = document.getElementById('timelineEmpty');
+        const timelineCommentsList = document.getElementById('timelineCommentsList');
+        const timelineTaskTitle = document.getElementById('timelineTaskTitle');
+        const timelineTaskIdInput = document.getElementById('timeline_task_id');
+        const timelineCommentText = document.getElementById('timeline_comment_text');
+        const btnSubmitComment = document.getElementById('btnSubmitComment');
+
+        if (taskTimelineModal) {
+            taskTimelineModal.addEventListener('show.bs.modal', function(event) {
+                const button = event.relatedTarget;
+                const taskId = button.getAttribute('data-task-id');
+                const taskTitle = button.getAttribute('data-task-title');
+
+                // Reset modal fields
+                timelineTaskIdInput.value = taskId;
+                timelineTaskTitle.textContent = taskTitle;
+                timelineCommentText.value = '';
+                btnSubmitComment.disabled = false;
+                btnSubmitComment.innerHTML = '<i class="bi bi-send-fill"></i> Enviar Comentário';
+
+                // Display loading spinner
+                timelineLoading.style.display = 'block';
+                timelineEmpty.style.display = 'none';
+                timelineCommentsList.style.display = 'none';
+                timelineCommentsList.innerHTML = '';
+
+                // Fetch comments via AJAX
+                const formData = new FormData();
+                formData.append('csrf', document.getElementById('timeline_csrf_token').value);
+                formData.append('action', 'get_comments');
+                formData.append('task_id', taskId);
+
+                fetch('tasks.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    timelineLoading.style.display = 'none';
+                    if (data.success) {
+                        renderTimelineComments(data.comments);
+                    } else {
+                        showToast(data.message || 'Erro ao carregar comentários.', 'danger');
+                    }
+                })
+                .catch(error => {
+                    console.error(error);
+                    timelineLoading.style.display = 'none';
+                    showToast('Erro de rede ao buscar comentários.', 'danger');
+                });
+            });
+        }
+
+        function renderTimelineComments(comments) {
+            if (!comments || comments.length === 0) {
+                timelineEmpty.style.display = 'block';
+                timelineCommentsList.style.display = 'none';
+                return;
+            }
+
+            let html = '';
+            comments.forEach(c => {
+                html += createCommentHtml(c);
+            });
+
+            timelineCommentsList.innerHTML = html;
+            timelineCommentsList.style.display = 'block';
+            timelineEmpty.style.display = 'none';
+        }
+
+        function createCommentHtml(c) {
+            return `
+                <div class="d-flex gap-3 mb-4 position-relative timeline-item" data-comment-id="${c.id}">
+                    <div class="timeline-line" style="position: absolute; left: 16px; top: 32px; bottom: -24px; width: 2px; background-color: #e2e8f0; z-index: 1;"></div>
+                    <div class="agent-avatar-small rounded-circle bg-light border border-light-subtle d-flex align-items-center justify-content-center fw-bold text-secondary" style="width: 32px; height: 32px; font-size: 0.8rem; z-index: 2; position: relative;">
+                        ${c.initials}
+                    </div>
+                    <div class="flex-grow-1 bg-white p-3 rounded-3 border border-light-subtle shadow-sm" style="z-index: 2; position: relative;">
+                        <div class="d-flex align-items-center justify-content-between mb-1">
+                            <span class="fw-bold text-dark" style="font-size: 0.88rem;">${c.user_name}</span>
+                            <span class="text-muted" style="font-size: 0.75rem;"><i class="bi bi-clock me-1"></i>${c.created_at}</span>
+                        </div>
+                        <p class="text-muted mb-0 small" style="line-height: 1.4; white-space: pre-line;">${c.comment}</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (addCommentForm) {
+            addCommentForm.addEventListener('submit', function(event) {
+                event.preventDefault();
+
+                const commentText = timelineCommentText.value.trim();
+                if (!commentText) return;
+
+                // Disable submit button and show spinner
+                btnSubmitComment.disabled = true;
+                btnSubmitComment.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Enviando...';
+
+                const formData = new FormData(addCommentForm);
+
+                fetch('tasks.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    // Reset submit button
+                    btnSubmitComment.disabled = false;
+                    btnSubmitComment.innerHTML = '<i class="bi bi-send-fill"></i> Enviar Comentário';
+
+                    if (data.success) {
+                        timelineCommentText.value = '';
+                        
+                        // Prepend the new comment to the list
+                        prependTimelineComment(data.comment);
+                    } else {
+                        showToast(data.message || 'Erro ao adicionar comentário.', 'danger');
+                    }
+                })
+                .catch(error => {
+                    console.error(error);
+                    btnSubmitComment.disabled = false;
+                    btnSubmitComment.innerHTML = '<i class="bi bi-send-fill"></i> Enviar Comentário';
+                    showToast('Erro de rede ao adicionar comentário.', 'danger');
+                });
+            });
+        }
+
+        function prependTimelineComment(comment) {
+            timelineEmpty.style.display = 'none';
+
+            const commentHtml = createCommentHtml(comment);
+            
+            if (timelineCommentsList.style.display === 'none' || !timelineCommentsList.innerHTML) {
+                timelineCommentsList.innerHTML = commentHtml;
+                timelineCommentsList.style.display = 'block';
+            } else {
+                timelineCommentsList.insertAdjacentHTML('afterbegin', commentHtml);
+            }
+        }
 
         // Initial event binding
         initializeBoardEvents();

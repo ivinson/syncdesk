@@ -968,6 +968,9 @@ foreach ($tasks as $task) {
                 <a href="tasks.php" class="btn btn-outline-secondary btn-sm px-3 rounded-3 d-inline-flex align-items-center gap-2" style="font-weight: 500;">
                     <i class="bi bi-arrow-left"></i> Voltar para Lista
                 </a>
+                <button class="btn btn-outline-primary btn-sm px-3 rounded-3 d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#bulkTaskModal" style="font-weight: 500;">
+                    <i class="bi bi-layers"></i> Adicionar em Lote
+                </button>
                 <button class="btn btn-primary btn-sm px-3 rounded-3 d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#createTaskModal" style="font-weight: 500;">
                     <i class="bi bi-plus-lg"></i> Nova tarefa
                 </button>
@@ -1506,6 +1509,33 @@ foreach ($tasks as $task) {
             <div class="modal-body">
                 <div id="modalAssetsList">
                     <!-- Dinamic Content Loaded via JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==========================================
+      MODAL: BULK TASK PLACEHOLDER (Bootstrap 5)
+     ========================================== -->
+<div class="modal fade" id="bulkTaskModal" tabindex="-1" aria-labelledby="bulkTaskModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" style="max-width: 400px;">
+        <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
+            <div class="modal-body text-center p-4">
+                <div class="d-flex justify-content-end">
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="my-3">
+                    <div class="d-inline-flex align-items-center justify-content-center bg-warning-subtle text-warning rounded-circle mb-3" style="width: 72px; height: 72px; font-size: 2.25rem;">
+                        <i class="bi bi-clock-history"></i>
+                    </div>
+                    <h4 class="fw-bold text-dark mb-2">Em breve</h4>
+                    <p class="text-muted mb-4 small px-2">
+                        A funcionalidade de criação de tarefas em lote está em desenvolvimento e estará disponível em breve para otimizar a sua gestão.
+                    </p>
+                    <button type="button" class="btn btn-primary w-100 rounded-3 py-2 fw-semibold" data-bs-dismiss="modal">
+                        Entendido
+                    </button>
                 </div>
             </div>
         </div>
