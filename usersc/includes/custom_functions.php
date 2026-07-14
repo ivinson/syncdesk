@@ -21,3 +21,5 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //Put your custom functions in this file and they will be automatically included.
 
 //bold("<br><br>custom helpers included");
+
+define('GEMINI_API_KEY', '');

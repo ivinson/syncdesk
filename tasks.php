@@ -357,7 +357,6 @@ if (Input::exists()) {
 // Get available customers and agents for selectors based on role
 if ($is_admin) {
     $available_customers = $db->query("SELECT id, name, company_name FROM customers WHERE status = 1 ORDER BY name ASC")->results();
-    $available_agents = $db->query("SELECT id, fname, lname, username FROM users WHERE active = 1 ORDER BY fname ASC, username ASC")->results();
 } else {
     $available_customers = $db->query("
         SELECT c.id, c.name, c.company_name 
@@ -365,8 +364,8 @@ if ($is_admin) {
         JOIN customer_agent ca ON c.id = ca.customer_id 
         WHERE ca.user_id = ? AND c.status = 1 
         ORDER BY c.name ASC", [$user_id])->results();
-    $available_agents = [];
 }
+$available_agents = $db->query("SELECT id, fname, lname, username FROM users WHERE active = 1 ORDER BY fname ASC, username ASC")->results();
 
 // ==========================================
 // TASK FILTERS AND STATS (Multitenant Logic)
@@ -1576,31 +1575,80 @@ foreach ($tasks as $task) {
 </div>
 
 <!-- ==========================================
-      MODAL: BULK TASK PLACEHOLDER (Bootstrap 5)
+      MODAL: BULK TASK IMPORT WITH AI (Bootstrap 5)
      ========================================== -->
 <div class="modal fade" id="bulkTaskModal" tabindex="-1" aria-labelledby="bulkTaskModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered" style="max-width: 400px;">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
-            <div class="modal-body text-center p-4">
-                <div class="d-flex justify-content-end">
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="my-3">
-                    <div class="d-inline-flex align-items-center justify-content-center bg-warning-subtle text-warning rounded-circle mb-3" style="width: 72px; height: 72px; font-size: 2.25rem;">
-                        <i class="bi bi-clock-history"></i>
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold" id="bulkTaskModalLabel"><i class="bi bi-magic text-primary me-2"></i>Adicionar em Lote com IA</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body bg-white rounded-bottom-4 p-4">
+                <!-- Step 1: Input Form -->
+                <div id="bulkStepInput">
+                    <p class="text-muted small mb-3">Cole um texto corrido (como atas de reuniões, e-mails, notas) para que a IA identifique, estruture e associe automaticamente as tarefas aos clientes e responsáveis.</p>
+                    
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label for="bulk_default_customer_id" class="form-label fw-semibold" style="font-size:0.9rem;">Cliente Padrão <span class="text-muted small fw-normal">(Opcional)</span></label>
+                            <select class="form-select rounded-3" id="bulk_default_customer_id" style="border-color: #cbd5e1;">
+                                <option value="" selected>Nenhum (Tentar mapear do texto)</option>
+                                <?php foreach ($available_customers as $cust): ?>
+                                    <option value="<?= $cust->id ?>"><?= htmlspecialchars($cust->name) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="bulk_default_assigned_to" class="form-label fw-semibold" style="font-size:0.9rem;">Responsável Padrão <span class="text-muted small fw-normal">(Opcional)</span></label>
+                            <select class="form-select rounded-3" id="bulk_default_assigned_to" style="border-color: #cbd5e1;">
+                                <option value="" <?= $is_admin ? 'selected' : '' ?>>Nenhum (Tentar mapear do texto)</option>
+                                <?php foreach ($available_agents as $agent): 
+                                    $a_name = trim($agent->fname . ' ' . $agent->lname) ?: $agent->username;
+                                    $selected = (!$is_admin && $agent->id == $user_id) ? 'selected' : '';
+                                ?>
+                                    <option value="<?= $agent->id ?>" <?= $selected ?>><?= htmlspecialchars($a_name) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
                     </div>
-                    <h4 class="fw-bold text-dark mb-2">Em breve</h4>
-                    <p class="text-muted mb-4 small px-2">
-                        A funcionalidade de criação de tarefas em lote está em desenvolvimento e estará disponível em breve para otimizar a sua gestão.
-                    </p>
-                    <button type="button" class="btn btn-primary w-100 rounded-3 py-2 fw-semibold" data-bs-dismiss="modal">
-                        Entendido
-                    </button>
+
+                    <div class="mb-3">
+                        <label for="bulk_text_input" class="form-label fw-semibold" style="font-size:0.9rem;">Texto para Extração de Tarefas</label>
+                        <textarea class="form-control rounded-3" id="bulk_text_input" rows="8" style="border-color: #cbd5e1;" placeholder="Digite ou cole aqui o texto (atas de reuniões, e-mails, notas ou conversas) contendo as tarefas a serem extraídas..." required></textarea>
+                    </div>
+
+                    <div class="d-flex gap-2 justify-content-end mt-4">
+                        <button type="button" class="btn btn-light rounded-3 px-4" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="button" id="btnAnalyzeBulk" class="btn btn-primary rounded-3 px-4 d-inline-flex align-items-center gap-2">
+                            <i class="bi bi-cpu"></i> Analisar com IA
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Step 2: Preview checklist -->
+                <div id="bulkStepPreview" style="display: none;">
+                    <div class="d-flex align-items-center justify-content-between mb-3 border-bottom pb-2">
+                        <h6 class="fw-bold text-dark mb-0">Tarefas Identificadas pela IA (<span id="bulkTaskCount">0</span>)</h6>
+                        <span class="badge bg-purple-subtle text-purple border border-purple-subtle py-1 px-2.5 small" style="font-size: 0.75rem; background-color: #f3e8ff; color: #7c3aed; border-color: #e9d5ff;"><i class="bi bi-magic me-1"></i>Mapeadas por IA</span>
+                    </div>
+                    
+                    <div id="bulkTasksPreviewList" class="mb-4" style="max-height: 400px; overflow-y: auto; padding-right: 5px;">
+                        <!-- Dynamically populated checklist cards -->
+                    </div>
+
+                    <div class="d-flex gap-2 justify-content-end mt-4 border-top pt-3">
+                        <button type="button" id="btnBackToInput" class="btn btn-light rounded-3 px-3"><i class="bi bi-arrow-left me-1"></i>Voltar</button>
+                        <button type="button" id="btnSaveBulkTasks" class="btn btn-success rounded-3 px-4 d-inline-flex align-items-center gap-2">
+                            <i class="bi bi-check-circle"></i> Adicionar Tarefas Selecionadas
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 </div>
+
 
 <!-- ==========================================
       MODAL: TASK DETAILS & TIMELINE (Bootstrap 5)
@@ -2296,6 +2344,334 @@ foreach ($tasks as $task) {
             } else {
                 timelineCommentsList.insertAdjacentHTML('afterbegin', commentHtml);
             }
+        }
+
+        // ==========================================
+        // BULK TASK IMPORT WITH AI
+        // ==========================================
+        const bulkTaskModalEl = document.getElementById('bulkTaskModal');
+        const btnAnalyzeBulk = document.getElementById('btnAnalyzeBulk');
+        const btnSaveBulkTasks = document.getElementById('btnSaveBulkTasks');
+        const btnBackToInput = document.getElementById('btnBackToInput');
+        const bulkStepInput = document.getElementById('bulkStepInput');
+        const bulkStepPreview = document.getElementById('bulkStepPreview');
+        const bulkTasksPreviewList = document.getElementById('bulkTasksPreviewList');
+        const bulkTextVal = document.getElementById('bulk_text_input');
+        const bulkTaskCount = document.getElementById('bulkTaskCount');
+
+        let extractedTasks = [];
+        let availableCustomers = [];
+        let availableAgents = [];
+
+        // Reset modal on hide
+        if (bulkTaskModalEl) {
+            bulkTaskModalEl.addEventListener('hidden.bs.modal', function () {
+                bulkStepInput.style.display = 'block';
+                bulkStepPreview.style.display = 'none';
+                bulkTextVal.value = '';
+                bulkTasksPreviewList.innerHTML = '';
+                btnAnalyzeBulk.disabled = false;
+                btnAnalyzeBulk.innerHTML = '<i class="bi bi-cpu"></i> Analisar com IA';
+                extractedTasks = [];
+            });
+        }
+
+        if (btnAnalyzeBulk) {
+            btnAnalyzeBulk.addEventListener('click', function() {
+                const text = bulkTextVal.value.trim();
+                if (!text) {
+                    showToast('Por favor, digite ou cole um texto para análise.', 'warning');
+                    return;
+                }
+
+                const defaultCustomer = document.getElementById('bulk_default_customer_id').value;
+                const defaultAgent = document.getElementById('bulk_default_assigned_to').value;
+
+                // Set loading state
+                btnAnalyzeBulk.disabled = true;
+                btnAnalyzeBulk.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Analisando...';
+
+                fetch('api_identify_tasks.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        action: 'analyze',
+                        text: text,
+                        default_customer_id: defaultCustomer,
+                        default_assigned_to: defaultAgent
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    btnAnalyzeBulk.disabled = false;
+                    btnAnalyzeBulk.innerHTML = '<i class="bi bi-cpu"></i> Analisar com IA';
+
+                    if (data.success) {
+                        extractedTasks = data.tasks;
+                        availableCustomers = data.customers;
+                        availableAgents = data.agents;
+
+                        renderBulkPreview();
+
+                        bulkStepInput.style.display = 'none';
+                        bulkStepPreview.style.display = 'block';
+                    } else {
+                        showToast(data.message || 'Erro ao analisar o texto.', 'danger');
+                    }
+                })
+                .catch(error => {
+                    console.error(error);
+                    btnAnalyzeBulk.disabled = false;
+                    btnAnalyzeBulk.innerHTML = '<i class="bi bi-cpu"></i> Analisar com IA';
+                    showToast('Erro de rede ao conectar com o servidor.', 'danger');
+                });
+            });
+        }
+
+        if (btnBackToInput) {
+            btnBackToInput.addEventListener('click', function() {
+                bulkStepInput.style.display = 'block';
+                bulkStepPreview.style.display = 'none';
+            });
+        }
+
+        function renderBulkPreview() {
+            bulkTasksPreviewList.innerHTML = '';
+            bulkTaskCount.textContent = extractedTasks.length;
+
+            if (extractedTasks.length === 0) {
+                bulkTasksPreviewList.innerHTML = `
+                    <div class="text-center py-4 text-muted bg-light rounded-3 border border-dashed">
+                        <i class="bi bi-emoji-frown fs-3 d-block mb-2"></i>
+                        Nenhuma tarefa pôde ser identificada no texto. Tente reescrever ou fornecer mais detalhes.
+                    </div>
+                `;
+                btnSaveBulkTasks.disabled = true;
+                return;
+            }
+
+            btnSaveBulkTasks.disabled = false;
+
+            extractedTasks.forEach((task, index) => {
+                const card = document.createElement('div');
+                card.className = 'bulk-preview-card border rounded-3 p-3 mb-2 bg-white';
+                card.style.transition = 'all 0.2s ease';
+                card.dataset.index = index;
+
+                // Build customer options
+                let custOptions = '<option value="" disabled>Selecionar Cliente...</option>';
+                let matchedCust = false;
+                availableCustomers.forEach(c => {
+                    const isSelected = (task.customer_id && parseInt(task.customer_id) === parseInt(c.id));
+                    if (isSelected) matchedCust = true;
+                    custOptions += `<option value="${c.id}" ${isSelected ? 'selected' : ''}>${escapeHtml(c.name)}</option>`;
+                });
+
+                // Build agent options
+                let agentOptions = '';
+                // Check if admin to allow change
+                const currentUserId = <?= json_encode($user_id) ?>;
+
+                availableAgents.forEach(a => {
+                    const isSelected = (task.assigned_to && parseInt(task.assigned_to) === parseInt(a.id)) || (!task.assigned_to && parseInt(a.id) === parseInt(currentUserId));
+                    const aName = (a.fname || a.lname) ? `${a.fname} ${a.lname}`.trim() : a.username;
+                    agentOptions += `<option value="${a.id}" ${isSelected ? 'selected' : ''}>${escapeHtml(aName)}</option>`;
+                });
+
+                // AI magic badge if both client and agent were identified or if either was
+                const hasAiMagic = task.customer_id || task.assigned_to;
+                const magicBadge = hasAiMagic ? `<span class="badge bg-purple-subtle text-purple ms-2" style="font-size:0.7rem; background-color: #f3e8ff; color: #7c3aed;" title="Mapeado automaticamente por IA"><i class="bi bi-magic"></i> Mapeado</span>` : '';
+
+                // Border warning if client is not selected/matched
+                const borderClass = !task.customer_id ? 'border-warning shadow-sm' : 'border-light-subtle';
+
+                card.innerHTML = `
+                    <div class="d-flex gap-3 align-items-start">
+                        <div class="pt-1">
+                            <input type="checkbox" class="form-check-input bulk-task-checkbox" checked style="width: 1.25rem; height: 1.25rem; cursor: pointer;">
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div class="d-flex align-items-center">
+                                    <span class="small text-muted fw-bold">Tarefa #${index + 1}</span>
+                                    ${magicBadge}
+                                </div>
+                                <button type="button" class="btn btn-link btn-sm text-danger p-0 btn-remove-bulk-card" title="Descartar tarefa">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                            
+                            <div class="mb-2">
+                                <input type="text" class="form-control form-control-sm rounded-3 fw-bold bulk-task-title" value="${escapeHtml(task.title)}" placeholder="Título da tarefa" style="border-color: #cbd5e1;">
+                            </div>
+                            
+                            <div class="mb-2">
+                                <textarea class="form-control form-control-sm rounded-3 bulk-task-desc" rows="2" placeholder="Descrição / Detalhes" style="border-color: #cbd5e1; font-size: 0.82rem;">${escapeHtml(task.description || '')}</textarea>
+                            </div>
+                            
+                            <div class="row g-2">
+                                <div class="col-md-5">
+                                    <select class="form-select form-select-sm rounded-3 bulk-task-customer ${!task.customer_id ? 'border-warning' : ''}" style="font-size: 0.8rem;" onchange="this.classList.remove('border-warning')">
+                                        ${custOptions}
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <select class="form-select form-select-sm rounded-3 bulk-task-agent" style="font-size: 0.8rem;">
+                                        ${agentOptions}
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <select class="form-select form-select-sm rounded-3 bulk-task-priority" style="font-size: 0.8rem; font-weight:600;">
+                                        <option value="low" ${task.priority === 'low' ? 'selected' : ''}>Baixa</option>
+                                        <option value="medium" ${task.priority === 'medium' || !task.priority ? 'selected' : ''}>Média</option>
+                                        <option value="high" ${task.priority === 'high' ? 'selected' : ''}>Alta</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // Add event listeners inside card
+                const checkbox = card.querySelector('.bulk-task-checkbox');
+                checkbox.addEventListener('change', function() {
+                    if (this.checked) {
+                        card.classList.remove('opacity-50');
+                        card.style.backgroundColor = '#ffffff';
+                    } else {
+                        card.classList.add('opacity-50');
+                        card.style.backgroundColor = '#f8fafc';
+                    }
+                });
+
+                // Trash icon
+                const btnRemove = card.querySelector('.btn-remove-bulk-card');
+                btnRemove.addEventListener('click', function() {
+                    card.style.transform = 'scale(0.95)';
+                    card.style.opacity = '0';
+                    setTimeout(() => {
+                        card.remove();
+                        updateBulkCount();
+                    }, 200);
+                });
+
+                // Dynamic priority colors
+                const prioritySelect = card.querySelector('.bulk-task-priority');
+                const updatePriorityColors = (sel) => {
+                    sel.classList.remove('text-success', 'text-warning', 'text-danger');
+                    if (sel.value === 'low') sel.classList.add('text-success');
+                    else if (sel.value === 'medium') sel.classList.add('text-warning');
+                    else if (sel.value === 'high') sel.classList.add('text-danger');
+                };
+                prioritySelect.addEventListener('change', function() {
+                    updatePriorityColors(this);
+                });
+                updatePriorityColors(prioritySelect);
+
+                bulkTasksPreviewList.appendChild(card);
+            });
+        }
+
+        function updateBulkCount() {
+            const cards = bulkTasksPreviewList.querySelectorAll('.bulk-preview-card');
+            bulkTaskCount.textContent = cards.length;
+            if (cards.length === 0) {
+                bulkTasksPreviewList.innerHTML = `
+                    <div class="text-center py-4 text-muted bg-light rounded-3 border border-dashed">
+                        <i class="bi bi-emoji-frown fs-3 d-block mb-2"></i>
+                        Nenhuma tarefa restante.
+                    </div>
+                `;
+                btnSaveBulkTasks.disabled = true;
+            }
+        }
+
+        if (btnSaveBulkTasks) {
+            btnSaveBulkTasks.addEventListener('click', function() {
+                const cards = bulkTasksPreviewList.querySelectorAll('.bulk-preview-card');
+                const tasksToSave = [];
+                let validationError = false;
+
+                cards.forEach(card => {
+                    const checkbox = card.querySelector('.bulk-task-checkbox');
+                    if (checkbox && checkbox.checked) {
+                        const title = card.querySelector('.bulk-task-title').value.trim();
+                        const description = card.querySelector('.bulk-task-desc').value.trim();
+                        const customerId = card.querySelector('.bulk-task-customer').value;
+                        const assignedTo = card.querySelector('.bulk-task-agent').value;
+                        const priority = card.querySelector('.bulk-task-priority').value;
+
+                        if (!title) {
+                            showToast('O título de todas as tarefas selecionadas deve ser preenchido.', 'warning');
+                            card.querySelector('.bulk-task-title').focus();
+                            validationError = true;
+                            return;
+                        }
+
+                        if (!customerId) {
+                            showToast('Por favor, selecione o cliente para todas as tarefas marcadas.', 'warning');
+                            card.querySelector('.bulk-task-customer').classList.add('border-warning');
+                            card.querySelector('.bulk-task-customer').focus();
+                            validationError = true;
+                            return;
+                        }
+
+                        tasksToSave.push({
+                            title: title,
+                            description: description,
+                            customer_id: customerId,
+                            assigned_to: assignedTo,
+                            priority: priority
+                        });
+                    }
+                });
+
+                if (validationError) return;
+
+                if (tasksToSave.length === 0) {
+                    showToast('Por favor, marque pelo menos uma tarefa para salvar.', 'warning');
+                    return;
+                }
+
+                // Set loading state
+                btnSaveBulkTasks.disabled = true;
+                btnSaveBulkTasks.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Salvando...';
+
+                fetch('api_identify_tasks.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        action: 'save',
+                        tasks: tasksToSave
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    btnSaveBulkTasks.disabled = false;
+                    btnSaveBulkTasks.innerHTML = '<i class="bi bi-check-circle"></i> Adicionar Tarefas Selecionadas';
+
+                    if (data.success) {
+                        // Close modal
+                        const modal = bootstrap.Modal.getInstance(bulkTaskModalEl);
+                        if (modal) modal.hide();
+                        
+                        // Redirect with success message
+                        window.location.href = window.location.pathname + '?success=' + encodeURIComponent(data.message);
+                    } else {
+                        showToast(data.message || 'Erro ao salvar as tarefas.', 'danger');
+                    }
+                })
+                .catch(error => {
+                    console.error(error);
+                    btnSaveBulkTasks.disabled = false;
+                    btnSaveBulkTasks.innerHTML = '<i class="bi bi-check-circle"></i> Adicionar Tarefas Selecionadas';
+                    showToast('Erro de rede ao salvar tarefas.', 'danger');
+                });
+            });
         }
 
         // Initial event binding
