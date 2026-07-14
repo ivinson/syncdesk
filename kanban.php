@@ -1086,9 +1086,9 @@ foreach ($tasks as $task) {
                                              data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
                                              data-task-priority="<?= $task->priority ?>"
                                              data-task-status="<?= $task->status ?>"
-                                             data-task-customer-id="<?= $task->customer_id ?>"
-                                             data-task-assigned-to="<?= $task->assigned_to ?>"
-                                             data-task-deadline="<?= $task->deadline ?>"
+                                             data-task-customer-name="<?= htmlspecialchars($task->customer_name) ?>"
+                                             data-task-assigned-name="<?= htmlspecialchars($agent_name) ?>"
+                                             data-task-deadline="<?= !empty($task->deadline) && $task->deadline != '0000-00-00' ? date('d/m/Y', strtotime($task->deadline)) : 'Sem prazo' ?>"
                                              style="cursor: pointer;">
                                              
                                              <!-- Top line: Client (Left) & Priority/Edit (Right) -->
@@ -1112,29 +1112,12 @@ foreach ($tasks as $task) {
                                                              title="Editar Tarefa">
                                                          <i class="bi bi-pencil-square"></i>
                                                      </button>
-                                                     <button class="btn btn-link btn-sm p-0 timeline-task-btn text-muted ms-1" 
-                                                             style="font-size: 0.85rem;"
-                                                             data-bs-toggle="modal" 
-                                                             data-bs-target="#taskTimelineModal"
-                                                             data-task-id="<?= $task->id ?>"
-                                                             data-task-title="<?= htmlspecialchars($task->title) ?>"
-                                                             title="Timeline da Tarefa">
-                                                         <i class="bi bi-clock-history"></i>
-                                                     </button>
+
                                                  </div>
                                              </div>
                                              
                                              <!-- Task Title -->
                                              <div class="task-card-title mb-1"><?= htmlspecialchars($task->title) ?></div>
-                                             
-                                             <!-- Collapsible Description -->
-                                             <?php if (!empty($task->description)): ?>
-                                                 <div class="task-desc-collapse collapse" id="desc-collapse-<?= $task->id ?>">
-                                                     <p class="text-muted mb-0 mt-2 pt-2 border-top" style="font-size: 0.8rem; line-height: 1.4; white-space: pre-line;">
-                                                         <?= htmlspecialchars($task->description) ?>
-                                                     </p>
-                                                 </div>
-                                             <?php endif; ?>
                                              
                                              <!-- Footer: Responsible (Left) & DateTime (Right) -->
                                              <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top border-light-subtle">
@@ -1191,9 +1174,9 @@ foreach ($tasks as $task) {
                                              data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
                                              data-task-priority="<?= $task->priority ?>"
                                              data-task-status="<?= $task->status ?>"
-                                             data-task-customer-id="<?= $task->customer_id ?>"
-                                             data-task-assigned-to="<?= $task->assigned_to ?>"
-                                             data-task-deadline="<?= $task->deadline ?>"
+                                             data-task-customer-name="<?= htmlspecialchars($task->customer_name) ?>"
+                                             data-task-assigned-name="<?= htmlspecialchars($agent_name) ?>"
+                                             data-task-deadline="<?= !empty($task->deadline) && $task->deadline != '0000-00-00' ? date('d/m/Y', strtotime($task->deadline)) : 'Sem prazo' ?>"
                                              style="cursor: pointer;">
                                              
                                              <!-- Top line: Client (Left) & Priority/Edit (Right) -->
@@ -1217,29 +1200,12 @@ foreach ($tasks as $task) {
                                                              title="Editar Tarefa">
                                                          <i class="bi bi-pencil-square"></i>
                                                      </button>
-                                                     <button class="btn btn-link btn-sm p-0 timeline-task-btn text-muted ms-1" 
-                                                             style="font-size: 0.85rem;"
-                                                             data-bs-toggle="modal" 
-                                                             data-bs-target="#taskTimelineModal"
-                                                             data-task-id="<?= $task->id ?>"
-                                                             data-task-title="<?= htmlspecialchars($task->title) ?>"
-                                                             title="Timeline da Tarefa">
-                                                         <i class="bi bi-clock-history"></i>
-                                                     </button>
+
                                                  </div>
                                              </div>
                                              
                                              <!-- Task Title -->
                                              <div class="task-card-title mb-1"><?= htmlspecialchars($task->title) ?></div>
-                                             
-                                             <!-- Collapsible Description -->
-                                             <?php if (!empty($task->description)): ?>
-                                                 <div class="task-desc-collapse collapse" id="desc-collapse-<?= $task->id ?>">
-                                                     <p class="text-muted mb-0 mt-2 pt-2 border-top" style="font-size: 0.8rem; line-height: 1.4; white-space: pre-line;">
-                                                         <?= htmlspecialchars($task->description) ?>
-                                                     </p>
-                                                 </div>
-                                             <?php endif; ?>
                                              
                                              <!-- Footer: Responsible (Left) & DateTime (Right) -->
                                              <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top border-light-subtle">
@@ -1296,9 +1262,9 @@ foreach ($tasks as $task) {
                                              data-task-desc="<?= htmlspecialchars($task->description ?? '') ?>"
                                              data-task-priority="<?= $task->priority ?>"
                                              data-task-status="<?= $task->status ?>"
-                                             data-task-customer-id="<?= $task->customer_id ?>"
-                                             data-task-assigned-to="<?= $task->assigned_to ?>"
-                                             data-task-deadline="<?= $task->deadline ?>"
+                                             data-task-customer-name="<?= htmlspecialchars($task->customer_name) ?>"
+                                             data-task-assigned-name="<?= htmlspecialchars($agent_name) ?>"
+                                             data-task-deadline="<?= !empty($task->deadline) && $task->deadline != '0000-00-00' ? date('d/m/Y', strtotime($task->deadline)) : 'Sem prazo' ?>"
                                              style="cursor: pointer;">
                                              
                                              <!-- Top line: Client (Left) & Priority/Edit (Right) -->
@@ -1322,29 +1288,12 @@ foreach ($tasks as $task) {
                                                              title="Editar Tarefa">
                                                          <i class="bi bi-pencil-square"></i>
                                                      </button>
-                                                     <button class="btn btn-link btn-sm p-0 timeline-task-btn text-muted ms-1" 
-                                                             style="font-size: 0.85rem;"
-                                                             data-bs-toggle="modal" 
-                                                             data-bs-target="#taskTimelineModal"
-                                                             data-task-id="<?= $task->id ?>"
-                                                             data-task-title="<?= htmlspecialchars($task->title) ?>"
-                                                             title="Timeline da Tarefa">
-                                                         <i class="bi bi-clock-history"></i>
-                                                     </button>
+
                                                  </div>
                                              </div>
                                              
                                              <!-- Task Title -->
                                              <div class="task-card-title mb-1"><?= htmlspecialchars($task->title) ?></div>
-                                             
-                                             <!-- Collapsible Description -->
-                                             <?php if (!empty($task->description)): ?>
-                                                 <div class="task-desc-collapse collapse" id="desc-collapse-<?= $task->id ?>">
-                                                     <p class="text-muted mb-0 mt-2 pt-2 border-top" style="font-size: 0.8rem; line-height: 1.4; white-space: pre-line;">
-                                                         <?= htmlspecialchars($task->description) ?>
-                                                     </p>
-                                                 </div>
-                                             <?php endif; ?>
                                              
                                              <!-- Footer: Responsible (Left) & DateTime (Right) -->
                                              <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top border-light-subtle">
@@ -1596,57 +1545,118 @@ foreach ($tasks as $task) {
     </div>
 </div>
 
-<!-- ==========================================      MODAL: TASK TIMELINE (Bootstrap 5)     ========================================== -->
-<div class="modal fade" id="taskTimelineModal" tabindex="-1" aria-labelledby="taskTimelineModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
+<!-- ==========================================
+      MODAL: TASK DETAILS & TIMELINE (Bootstrap 5)
+     ========================================== -->
+<div class="modal fade" id="taskDetailModal" tabindex="-1" aria-labelledby="taskDetailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content border-0 shadow-lg" style="border-radius: 18px;">
             <div class="modal-header border-bottom-0 pb-0 pt-4 px-4">
-                <div class="d-flex align-items-center">
+                <div class="d-flex align-items-center w-100">
                     <div class="bg-primary-subtle text-primary rounded-circle p-2.5 me-3 d-inline-flex align-items-center justify-content-center" style="width: 48px; height: 48px; background-color: #eff6ff; color: #3b82f6;">
-                        <i class="bi bi-clock-history fs-4"></i>
+                        <i class="bi bi-card-checklist fs-4"></i>
                     </div>
-                    <div>
-                        <h5 class="modal-title fw-bold text-dark mb-0" id="taskTimelineModalLabel">Timeline da Tarefa</h5>
-                        <p class="text-muted small mb-0" id="timelineTaskTitle" style="font-size: 0.85rem; font-weight: 500;"></p>
+                    <div class="flex-grow-1">
+                        <span class="badge bg-light text-secondary border mb-1" id="detailTaskIdLabel">#T-</span>
+                        <h5 class="modal-title fw-bold text-dark mb-0" id="taskDetailModalLabel">Detalhes da Tarefa</h5>
                     </div>
+                    <button type="button" class="btn-close ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             
-            <div class="modal-body p-4">
-                <!-- Add Comment Box -->
-                <form id="addCommentForm" class="mb-4">
-                    <input type="hidden" name="csrf" id="timeline_csrf_token" value="<?= Token::generate() ?>">
-                    <input type="hidden" name="action" value="add_comment">
-                    <input type="hidden" name="task_id" id="timeline_task_id">
-                    <div class="mb-2">
-                        <textarea class="form-control rounded-3 border-light-subtle" name="comment" id="timeline_comment_text" rows="3" placeholder="Escreva uma atualização ou comentário sobre a tarefa..." style="font-size: 0.9rem;" required></textarea>
+            <div class="modal-body p-4 bg-white rounded-bottom-4">
+                <!-- Task Badges Row -->
+                <div class="row g-3 mb-4 p-3 bg-light rounded-3 border border-light-subtle">
+                    <div class="col-6 col-md-3">
+                        <span class="text-muted small d-block mb-1"><i class="bi bi-tag-fill me-1"></i>Status</span>
+                        <span id="detailTaskStatus" class="status-select py-1 px-2.5 d-inline-block text-center border-0" style="width: auto; cursor: default;">-</span>
                     </div>
-                    <div class="d-flex justify-content-end">
-                        <button type="submit" class="btn btn-primary btn-sm px-4 rounded-3 d-inline-flex align-items-center gap-2" id="btnSubmitComment" style="font-weight: 500;">
-                            <i class="bi bi-send-fill"></i> Enviar Comentário
-                        </button>
+                    <div class="col-6 col-md-3">
+                        <span class="text-muted small d-block mb-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>Prioridade</span>
+                        <span id="detailTaskPriority" class="priority-badge">-</span>
                     </div>
-                </form>
-                <!-- Comments Timeline Section -->
-                <h6 class="fw-bold text-muted small mb-3 text-uppercase" style="letter-spacing: 0.05em; font-size: 0.72rem;">Histórico de Comentários</h6>
-                
-                <!-- Loading Spinner -->
-                <div id="timelineLoading" class="text-center py-4">
-                    <div class="spinner-border spinner-border-sm text-primary" role="status">
-                        <span class="visually-hidden">Carregando...</span>
+                    <div class="col-6 col-md-3">
+                        <span class="text-muted small d-block mb-1"><i class="bi bi-building me-1"></i>Cliente</span>
+                        <span id="detailTaskCustomer" class="fw-semibold text-dark small d-block mt-1">-</span>
                     </div>
-                    <p class="text-muted small mt-2 mb-0">Carregando histórico...</p>
+                    <div class="col-6 col-md-3">
+                        <span class="text-muted small d-block mb-1"><i class="bi bi-calendar-event me-1"></i>Prazo</span>
+                        <span id="detailTaskDeadline" class="fw-semibold text-dark small d-block mt-1">-</span>
+                    </div>
+                    <div class="col-12 mt-2 pt-2 border-top border-light-subtle">
+                        <span class="text-muted small d-inline"><i class="bi bi-person-fill me-1"></i>Responsável:</span>
+                        <span id="detailTaskAgent" class="fw-semibold text-dark small ms-1">-</span>
+                    </div>
                 </div>
-                
-                <!-- No Comments Placeholder -->
-                <div id="timelineEmpty" class="text-center py-4 text-muted rounded-3 border border-dashed bg-light mb-3" style="display: none; font-size: 0.85rem;">
-                    <i class="bi bi-chat-left-dots fs-3 d-block mb-1 text-secondary"></i>
-                    Nenhum comentário registrado ainda.
+
+                <!-- Task Description -->
+                <div class="mb-4">
+                    <h6 class="fw-bold text-muted small mb-2 text-uppercase" style="letter-spacing: 0.05em; font-size: 0.72rem;">Descrição / Detalhes</h6>
+                    <div id="detailTaskDescription" class="p-3 bg-light rounded-3 border border-light-subtle text-dark" style="font-size: 0.9rem; line-height: 1.5; white-space: pre-line; min-height: 80px;">
+                        -
+                    </div>
                 </div>
-                <!-- Timeline Scroll Container -->
-                <div id="timelineCommentsList" class="overflow-y-auto px-1" style="max-height: 350px; display: none;">
-                    <!-- Dynamically populated via JavaScript -->
+
+                <!-- Comments & Timeline Accordion -->
+                <div class="accordion" id="taskDetailAccordion">
+                    <div class="accordion-item border border-light-subtle rounded-3 overflow-hidden">
+                        <h2 class="accordion-header" id="headingTimeline">
+                            <button class="accordion-button collapsed fw-bold text-dark d-flex align-items-center gap-2" 
+                                    type="button" 
+                                    data-bs-toggle="collapse" 
+                                    data-bs-target="#collapseTimeline" 
+                                    aria-expanded="false" 
+                                    aria-controls="collapseTimeline"
+                                    id="btnAccordionTimeline"
+                                    style="background-color: #f8fafc; font-size: 0.9rem; box-shadow: none;">
+                                <i class="bi bi-chat-left-text text-primary fs-5"></i> 
+                                <span>Timeline e Comentários</span>
+                            </button>
+                        </h2>
+                        <div id="collapseTimeline" 
+                             class="accordion-collapse collapse" 
+                             aria-labelledby="headingTimeline" 
+                             data-bs-parent="#taskDetailAccordion">
+                            <div class="accordion-body bg-white p-3">
+                                <!-- Add Comment Box -->
+                                <form id="addCommentForm" class="mb-4">
+                                    <input type="hidden" name="csrf" id="timeline_csrf_token" value="<?= Token::generate() ?>">
+                                    <input type="hidden" name="action" value="add_comment">
+                                    <input type="hidden" name="task_id" id="timeline_task_id">
+                                    <div class="mb-2">
+                                        <textarea class="form-control rounded-3 border-light-subtle" name="comment" id="timeline_comment_text" rows="3" placeholder="Escreva uma atualização ou comentário sobre a tarefa..." style="font-size: 0.9rem;" required></textarea>
+                                    </div>
+                                    <div class="d-flex justify-content-end">
+                                        <button type="submit" class="btn btn-primary btn-sm px-4 rounded-3 d-inline-flex align-items-center gap-2" id="btnSubmitComment" style="font-weight: 500;">
+                                            <i class="bi bi-send-fill"></i> Enviar Comentário
+                                        </button>
+                                    </div>
+                                </form>
+
+                                <!-- Comments Timeline Section -->
+                                <h6 class="fw-bold text-muted small mb-3 text-uppercase" style="letter-spacing: 0.05em; font-size: 0.72rem;">Histórico de Comentários</h6>
+                                
+                                <!-- Loading Spinner -->
+                                <div id="timelineLoading" class="text-center py-4" style="display: none;">
+                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                        <span class="visually-hidden">Carregando...</span>
+                                    </div>
+                                    <p class="text-muted small mt-2 mb-0">Carregando histórico...</p>
+                                </div>
+                                
+                                <!-- No Comments Placeholder -->
+                                <div id="timelineEmpty" class="text-center py-4 text-muted rounded-3 border border-dashed bg-light mb-3" style="display: none; font-size: 0.85rem;">
+                                    <i class="bi bi-chat-left-dots fs-3 d-block mb-1 text-secondary"></i>
+                                    Nenhum comentário registrado ainda.
+                                </div>
+
+                                <!-- Timeline Scroll Container -->
+                                <div id="timelineCommentsList" class="overflow-y-auto px-1" style="max-height: 350px; display: none;">
+                                    <!-- Dynamically populated via JavaScript -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1931,16 +1941,16 @@ foreach ($tasks as $task) {
                     card.style.opacity = '1';
                 });
 
-                // Toggle description collapse on card click
+                // Click card to open task detail modal
                 card.addEventListener('click', (e) => {
                     // Check if click was on link, button, or their children
-                    if (e.target.closest('a') || e.target.closest('button') || e.target.closest('.customer-link') || e.target.closest('.edit-task-btn')) {
+                    if (e.target.closest('a') || e.target.closest('button') || e.target.closest('.customer-link')) {
                         return;
                     }
-                    const descCollapseEl = card.querySelector('.task-desc-collapse');
-                    if (descCollapseEl) {
-                        const bsCollapse = bootstrap.Collapse.getOrCreateInstance(descCollapseEl);
-                        bsCollapse.toggle();
+                    const detailModalEl = document.getElementById('taskDetailModal');
+                    if (detailModalEl) {
+                        const detailModal = bootstrap.Modal.getOrCreateInstance(detailModalEl);
+                        detailModal.show(card);
                     }
                 });
 
@@ -2074,30 +2084,92 @@ foreach ($tasks as $task) {
         }
 
         // ==========================================
-        // TASK TIMELINE & COMMENTS LOGIC
+        // TASK DETAILS & COMMENTS LOGIC
         // ==========================================
-        const taskTimelineModal = document.getElementById('taskTimelineModal');
+        const taskDetailModal = document.getElementById('taskDetailModal');
         const addCommentForm = document.getElementById('addCommentForm');
         const timelineLoading = document.getElementById('timelineLoading');
         const timelineEmpty = document.getElementById('timelineEmpty');
         const timelineCommentsList = document.getElementById('timelineCommentsList');
-        const timelineTaskTitle = document.getElementById('timelineTaskTitle');
         const timelineTaskIdInput = document.getElementById('timeline_task_id');
         const timelineCommentText = document.getElementById('timeline_comment_text');
         const btnSubmitComment = document.getElementById('btnSubmitComment');
+        
+        // Modal detail elements
+        const detailTaskIdLabel = document.getElementById('detailTaskIdLabel');
+        const taskDetailModalLabel = document.getElementById('taskDetailModalLabel');
+        const detailTaskDescription = document.getElementById('detailTaskDescription');
+        const detailTaskStatus = document.getElementById('detailTaskStatus');
+        const detailTaskPriority = document.getElementById('detailTaskPriority');
+        const detailTaskCustomer = document.getElementById('detailTaskCustomer');
+        const detailTaskDeadline = document.getElementById('detailTaskDeadline');
+        const detailTaskAgent = document.getElementById('detailTaskAgent');
+        const collapseTimeline = document.getElementById('collapseTimeline');
 
-        if (taskTimelineModal) {
-            taskTimelineModal.addEventListener('show.bs.modal', function(event) {
+        if (taskDetailModal) {
+            taskDetailModal.addEventListener('show.bs.modal', function(event) {
                 const button = event.relatedTarget;
                 const taskId = button.getAttribute('data-task-id');
                 const taskTitle = button.getAttribute('data-task-title');
+                const taskDesc = button.getAttribute('data-task-desc') || '';
+                const taskStatus = button.getAttribute('data-task-status') || '';
+                const taskPriority = button.getAttribute('data-task-priority') || '';
+                const taskCustomer = button.getAttribute('data-task-customer-name') || '';
+                const taskAgent = button.getAttribute('data-task-assigned-name') || '';
+                const taskDeadline = button.getAttribute('data-task-deadline') || '';
+                const expandTimeline = button.getAttribute('data-expand-timeline') === 'true';
 
-                // Reset modal fields
+                // Set detail values
+                detailTaskIdLabel.textContent = `#T-${taskId}`;
+                taskDetailModalLabel.textContent = taskTitle;
+                detailTaskDescription.textContent = taskDesc || 'Sem descrição cadastrada.';
+                
+                // Customer, Agent, Deadline
+                detailTaskCustomer.textContent = taskCustomer;
+                detailTaskAgent.textContent = taskAgent;
+                detailTaskDeadline.textContent = taskDeadline;
+
+                // Priority Badge
+                detailTaskPriority.className = 'priority-badge';
+                if (taskPriority === 'high') {
+                    detailTaskPriority.classList.add('priority-high');
+                    detailTaskPriority.textContent = 'Alta';
+                } else if (taskPriority === 'medium') {
+                    detailTaskPriority.classList.add('priority-medium');
+                    detailTaskPriority.textContent = 'Média';
+                } else {
+                    detailTaskPriority.classList.add('priority-low');
+                    detailTaskPriority.textContent = 'Baixa';
+                }
+
+                // Status Badge
+                detailTaskStatus.className = 'status-select py-1 px-2.5 d-inline-block text-center border-0';
+                detailTaskStatus.style.width = 'auto';
+                detailTaskStatus.style.cursor = 'default';
+                if (taskStatus === 'pending') {
+                    detailTaskStatus.classList.add('status-pending');
+                    detailTaskStatus.textContent = 'Pendente';
+                } else if (taskStatus === 'in_progress') {
+                    detailTaskStatus.classList.add('status-in_progress');
+                    detailTaskStatus.textContent = 'Em andamento';
+                } else {
+                    detailTaskStatus.classList.add('status-completed');
+                    detailTaskStatus.textContent = 'Concluído';
+                }
+
+                // Set comment task ID
                 timelineTaskIdInput.value = taskId;
-                timelineTaskTitle.textContent = taskTitle;
                 timelineCommentText.value = '';
                 btnSubmitComment.disabled = false;
                 btnSubmitComment.innerHTML = '<i class="bi bi-send-fill"></i> Enviar Comentário';
+
+                // Reset Accordion state
+                const bsCollapse = bootstrap.Collapse.getOrCreateInstance(collapseTimeline, { toggle: false });
+                if (expandTimeline) {
+                    bsCollapse.show();
+                } else {
+                    bsCollapse.hide();
+                }
 
                 // Display loading spinner
                 timelineLoading.style.display = 'block';
