@@ -1049,6 +1049,44 @@ foreach ($tasks as $task) {
         .timeline-item:last-child .timeline-line {
             display: none !important;
         }
+
+        /* Recording styles */
+        .recording-pulse-circle {
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            background-color: #dc3545;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            animation: pulseRecording 1.5s infinite;
+        }
+        @keyframes pulseRecording {
+            0% {
+                box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.4);
+            }
+            70% {
+                box-shadow: 0 0 0 15px rgba(220, 53, 69, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(220, 53, 69, 0);
+            }
+        }
+        .recording-dot {
+            width: 10px;
+            height: 10px;
+            background-color: #dc3545;
+            border-radius: 50%;
+            display: inline-block;
+            animation: flashDot 1s infinite alternate;
+        }
+        @keyframes flashDot {
+            from { opacity: 0.3; }
+            to { opacity: 1; }
+        }
+        .cursor-pointer {
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -1613,9 +1651,96 @@ foreach ($tasks as $task) {
                         </div>
                     </div>
 
-                    <div class="mb-3">
-                        <label for="bulk_text_input" class="form-label fw-semibold" style="font-size:0.9rem;">Texto para Extração de Tarefas</label>
-                        <textarea class="form-control rounded-3" id="bulk_text_input" rows="8" style="border-color: #cbd5e1;" placeholder="Digite ou cole aqui o texto (atas de reuniões, e-mails, notas ou conversas) contendo as tarefas a serem extraídas..." required></textarea>
+                    <ul class="nav nav-pills nav-fill mb-3 p-1 bg-light rounded-3" id="bulkInputTabs" role="tablist" style="border: 1px solid #e2e8f0;">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active rounded-2 fw-semibold py-2 d-flex align-items-center justify-content-center gap-2" id="text-tab" data-bs-toggle="tab" data-bs-target="#textTabPane" type="button" role="tab" aria-controls="textTabPane" aria-selected="true" style="font-size: 0.85rem;">
+                                <i class="bi bi-file-earmark-text"></i> Texto Escrito
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link rounded-2 fw-semibold py-2 d-flex align-items-center justify-content-center gap-2" id="audio-tab" data-bs-toggle="tab" data-bs-target="#audioTabPane" type="button" role="tab" aria-controls="audioTabPane" aria-selected="false" style="font-size: 0.85rem;">
+                                <i class="bi bi-mic"></i> Gravar Áudio / Voz
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content" id="bulkInputTabsContent">
+                        <!-- Aba Texto -->
+                        <div class="tab-pane fade show active" id="textTabPane" role="tabpanel" aria-labelledby="text-tab">
+                            <div class="mb-3">
+                                <label for="bulk_text_input" class="form-label fw-semibold" style="font-size:0.9rem;">Texto para Extração de Tarefas</label>
+                                <textarea class="form-control rounded-3" id="bulk_text_input" rows="8" style="border-color: #cbd5e1;" placeholder="Digite ou cole aqui o texto (atas de reuniões, e-mails, notas ou conversas) contendo as tarefas a serem extraídas..."></textarea>
+                            </div>
+                        </div>
+
+                        <!-- Aba Áudio -->
+                        <div class="tab-pane fade" id="audioTabPane" role="tabpanel" aria-labelledby="audio-tab">
+                            <div class="card border border-light-subtle rounded-3 p-4 bg-light text-center mb-3">
+                                
+                                <!-- Estado 1: Ocioso -->
+                                <div id="audioIdleState">
+                                    <div class="mb-3">
+                                        <button type="button" id="btnStartRecording" class="btn btn-outline-primary rounded-circle p-3 d-inline-flex align-items-center justify-content-center shadow-sm" style="width: 70px; height: 70px; border-width: 2px; transition: all 0.2s ease;">
+                                            <i class="bi bi-mic-fill fs-3 text-primary"></i>
+                                        </button>
+                                    </div>
+                                    <h6 class="fw-bold mb-1">Gravar Áudio da Reunião ou Briefing</h6>
+                                    <p class="text-muted small mb-3">Clique no microfone para iniciar a gravação por voz das tarefas.</p>
+                                    
+                                    <div class="text-muted mb-3" style="font-size: 0.8rem; font-weight: 500;">OU</div>
+                                    
+                                    <div>
+                                        <label for="audioFileInput" class="btn btn-sm btn-light border rounded-3 px-3 py-2 cursor-pointer shadow-sm fw-semibold" style="font-size: 0.8rem;">
+                                            <i class="bi bi-upload me-1 text-primary"></i> Enviar Arquivo de Áudio
+                                        </label>
+                                        <input type="file" id="audioFileInput" accept="audio/*" class="d-none">
+                                        <div class="text-muted small mt-1" style="font-size: 0.75rem;">Formatos suportados: MP3, WAV, M4A, OGG, WEBM (Max 15MB)</div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Estado 2: Gravando -->
+                                <div id="audioRecordingState" style="display: none;">
+                                    <div class="mb-3">
+                                        <div class="recording-pulse-circle">
+                                            <i class="bi bi-mic-fill text-white fs-3"></i>
+                                        </div>
+                                    </div>
+                                    <h6 class="fw-bold mb-1 text-danger d-flex align-items-center justify-content-center gap-2">
+                                        <span class="recording-dot"></span> Gravando Áudio...
+                                    </h6>
+                                    <p id="audioTimer" class="fw-bold fs-5 text-dark mb-3">00:00 / 03:00</p>
+                                    
+                                    <div class="d-flex justify-content-center gap-2">
+                                        <button type="button" id="btnStopRecording" class="btn btn-danger rounded-3 px-4 py-2 d-inline-flex align-items-center gap-2 fw-semibold shadow-sm">
+                                            <i class="bi bi-stop-fill"></i> Parar Gravação
+                                        </button>
+                                        <button type="button" id="btnCancelRecording" class="btn btn-light border rounded-3 px-3 py-2 text-secondary fw-semibold shadow-sm">
+                                            <i class="bi bi-x-circle"></i> Cancelar
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Estado 3: Pronto -->
+                                <div id="audioReadyState" style="display: none;">
+                                    <div class="mb-3">
+                                        <div class="bg-success-subtle text-success rounded-circle p-3 d-inline-flex align-items-center justify-content-center" style="width: 70px; height: 70px; background-color: #d1e7dd;">
+                                            <i class="bi bi-file-earmark-music-fill fs-2"></i>
+                                        </div>
+                                    </div>
+                                    <h6 id="audioFileName" class="fw-bold mb-2 text-dark" style="font-size: 0.95rem;">Áudio Capturado</h6>
+                                    <div class="d-flex justify-content-center mb-3">
+                                        <audio id="audioPreview" controls class="w-100" style="max-width: 400px; border-radius: 8px;"></audio>
+                                    </div>
+                                    
+                                    <div class="d-flex justify-content-center">
+                                        <button type="button" id="btnDiscardAudio" class="btn btn-outline-danger btn-sm rounded-3 px-3 py-2 d-inline-flex align-items-center gap-2 fw-semibold">
+                                            <i class="bi bi-trash"></i> Descartar e Recomeçar
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                            </div>
+                        </div>
                     </div>
 
                     <div class="d-flex gap-2 justify-content-end mt-4">
@@ -2363,6 +2488,219 @@ foreach ($tasks as $task) {
         let availableCustomers = [];
         let availableAgents = [];
 
+        // Recording state variables
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let audioBlob = null;
+        let audioBase64 = '';
+        let audioMimeType = '';
+        let recordingSeconds = 0;
+        let timerInterval = null;
+        const maxRecordingSeconds = 180; // 3 minutes
+
+        // Audio UI Elements
+        const audioIdleState = document.getElementById('audioIdleState');
+        const audioRecordingState = document.getElementById('audioRecordingState');
+        const audioReadyState = document.getElementById('audioReadyState');
+        
+        const btnStartRecording = document.getElementById('btnStartRecording');
+        const btnStopRecording = document.getElementById('btnStopRecording');
+        const btnCancelRecording = document.getElementById('btnCancelRecording');
+        const btnDiscardAudio = document.getElementById('btnDiscardAudio');
+        
+        const audioFileInput = document.getElementById('audioFileInput');
+        const audioFileName = document.getElementById('audioFileName');
+        const audioPreview = document.getElementById('audioPreview');
+        const audioTimer = document.getElementById('audioTimer');
+
+        const activeInputTab = () => {
+            const activeTab = document.querySelector('#bulkInputTabs .nav-link.active');
+            return activeTab ? activeTab.id : 'text-tab';
+        };
+
+        // Reset audio state helper
+        function resetAudioState() {
+            stopTimer();
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+            mediaRecorder = null;
+            audioChunks = [];
+            audioBlob = null;
+            audioBase64 = '';
+            audioMimeType = '';
+            if (audioFileInput) audioFileInput.value = '';
+            if (audioPreview) audioPreview.src = '';
+            
+            if (audioIdleState) audioIdleState.style.display = 'block';
+            if (audioRecordingState) audioRecordingState.style.display = 'none';
+            if (audioReadyState) audioReadyState.style.display = 'none';
+        }
+
+        // Timer functions
+        function startTimer() {
+            recordingSeconds = 0;
+            updateTimerDisplay();
+            timerInterval = setInterval(() => {
+                recordingSeconds++;
+                updateTimerDisplay();
+                if (recordingSeconds >= maxRecordingSeconds) {
+                    stopRecordingFlow();
+                }
+            }, 1000);
+        }
+
+        function stopTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+        }
+
+        function updateTimerDisplay() {
+            const mins = Math.floor(recordingSeconds / 60).toString().padStart(2, '0');
+            const secs = (recordingSeconds % 60).toString().padStart(2, '0');
+            const maxMins = Math.floor(maxRecordingSeconds / 60).toString().padStart(2, '0');
+            const maxSecs = (maxRecordingSeconds % 60).toString().padStart(2, '0');
+            if (audioTimer) {
+                audioTimer.textContent = `${mins}:${secs} / ${maxMins}:${maxSecs}`;
+            }
+        }
+
+        // Start recording
+        if (btnStartRecording) {
+            btnStartRecording.addEventListener('click', async function() {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    showToast('Seu navegador não suporta gravação de áudio ou microfone.', 'danger');
+                    return;
+                }
+
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    audioChunks = [];
+                    
+                    // Determine supported MIME types
+                    let options = { mimeType: 'audio/webm' };
+                    if (!MediaRecorder.isTypeSupported('audio/webm')) {
+                        options = { mimeType: 'audio/ogg' };
+                    }
+                    if (!MediaRecorder.isTypeSupported('audio/ogg')) {
+                        options = { mimeType: 'audio/mp4' };
+                    }
+                    if (!MediaRecorder.isTypeSupported('audio/mp4')) {
+                        options = {}; // browser default
+                    }
+
+                    mediaRecorder = new MediaRecorder(stream, options);
+                    
+                    mediaRecorder.addEventListener('dataavailable', event => {
+                        if (event.data.size > 0) {
+                            audioChunks.push(event.data);
+                        }
+                    });
+
+                    mediaRecorder.addEventListener('stop', () => {
+                        audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+                        audioMimeType = audioBlob.type;
+                        
+                        // Create preview URL
+                        const audioUrl = URL.createObjectURL(audioBlob);
+                        audioPreview.src = audioUrl;
+                        
+                        // Convert to base64
+                        const reader = new FileReader();
+                        reader.readAsDataURL(audioBlob);
+                        reader.onloadend = () => {
+                            const base64data = reader.result;
+                            audioBase64 = base64data.split(',')[1];
+                        };
+
+                        audioFileName.textContent = `Gravação de Voz (${(audioBlob.size / (1024 * 1024)).toFixed(2)} MB)`;
+                        
+                        audioRecordingState.style.display = 'none';
+                        audioReadyState.style.display = 'block';
+                        
+                        // Stop all tracks on the stream to turn off microphone light
+                        stream.getTracks().forEach(track => track.stop());
+                    });
+
+                    mediaRecorder.start();
+                    startTimer();
+                    
+                    audioIdleState.style.display = 'none';
+                    audioRecordingState.style.display = 'block';
+                    
+                } catch (err) {
+                    console.error(err);
+                    showToast('Não foi possível acessar o microfone. Verifique as permissões.', 'danger');
+                }
+            });
+        }
+
+        // Stop Recording
+        function stopRecordingFlow() {
+            stopTimer();
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+        }
+
+        if (btnStopRecording) {
+            btnStopRecording.addEventListener('click', stopRecordingFlow);
+        }
+
+        // Cancel Recording
+        if (btnCancelRecording) {
+            btnCancelRecording.addEventListener('click', function() {
+                stopTimer();
+                if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                    mediaRecorder.addEventListener('stop', () => {
+                        resetAudioState();
+                    }, { once: true });
+                    mediaRecorder.stop();
+                } else {
+                    resetAudioState();
+                }
+            });
+        }
+
+        // Discard Audio
+        if (btnDiscardAudio) {
+            btnDiscardAudio.addEventListener('click', resetAudioState);
+        }
+
+        // File Input Upload
+        if (audioFileInput) {
+            audioFileInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                if (file.size > 15 * 1024 * 1024) {
+                    showToast('O arquivo de áudio não deve exceder 15MB.', 'warning');
+                    audioFileInput.value = '';
+                    return;
+                }
+
+                audioMimeType = file.type || 'audio/webm';
+                audioBlob = file;
+
+                const audioUrl = URL.createObjectURL(file);
+                audioPreview.src = audioUrl;
+
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onloadend = () => {
+                    const base64data = reader.result;
+                    audioBase64 = base64data.split(',')[1];
+                };
+
+                audioFileName.textContent = `${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`;
+                
+                audioIdleState.style.display = 'none';
+                audioReadyState.style.display = 'block';
+            });
+        }
+
         // Reset modal on hide
         if (bulkTaskModalEl) {
             bulkTaskModalEl.addEventListener('hidden.bs.modal', function () {
@@ -2373,19 +2711,47 @@ foreach ($tasks as $task) {
                 btnAnalyzeBulk.disabled = false;
                 btnAnalyzeBulk.innerHTML = '<i class="bi bi-cpu"></i> Analisar com IA';
                 extractedTasks = [];
+
+                // Return to text tab on hide
+                const textTabBtn = document.getElementById('text-tab');
+                if (textTabBtn) {
+                    const tab = bootstrap.Tab.getInstance(textTabBtn) || new bootstrap.Tab(textTabBtn);
+                    tab.show();
+                }
+
+                resetAudioState();
             });
         }
 
         if (btnAnalyzeBulk) {
             btnAnalyzeBulk.addEventListener('click', function() {
-                const text = bulkTextVal.value.trim();
-                if (!text) {
-                    showToast('Por favor, digite ou cole um texto para análise.', 'warning');
-                    return;
-                }
-
+                const inputMode = activeInputTab();
+                let text = '';
+                
                 const defaultCustomer = document.getElementById('bulk_default_customer_id').value;
                 const defaultAgent = document.getElementById('bulk_default_assigned_to').value;
+
+                const requestBody = {
+                    action: 'analyze',
+                    default_customer_id: defaultCustomer,
+                    default_assigned_to: defaultAgent
+                };
+
+                if (inputMode === 'text-tab') {
+                    text = bulkTextVal.value.trim();
+                    if (!text) {
+                        showToast('Por favor, digite ou cole um texto para análise.', 'warning');
+                        return;
+                    }
+                    requestBody.text = text;
+                } else {
+                    if (!audioBase64) {
+                        showToast('Por favor, grave uma mensagem de voz ou envie um arquivo de áudio para análise.', 'warning');
+                        return;
+                    }
+                    requestBody.audio = audioBase64;
+                    requestBody.audio_mime = audioMimeType;
+                }
 
                 // Set loading state
                 btnAnalyzeBulk.disabled = true;
@@ -2396,12 +2762,7 @@ foreach ($tasks as $task) {
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({
-                        action: 'analyze',
-                        text: text,
-                        default_customer_id: defaultCustomer,
-                        default_assigned_to: defaultAgent
-                    })
+                    body: JSON.stringify(requestBody)
                 })
                 .then(response => response.json())
                 .then(data => {
@@ -2418,7 +2779,7 @@ foreach ($tasks as $task) {
                         bulkStepInput.style.display = 'none';
                         bulkStepPreview.style.display = 'block';
                     } else {
-                        showToast(data.message || 'Erro ao analisar o texto.', 'danger');
+                        showToast(data.message || 'Erro ao analisar.', 'danger');
                     }
                 })
                 .catch(error => {

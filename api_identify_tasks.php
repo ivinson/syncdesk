@@ -25,11 +25,13 @@ $action = isset($data['action']) ? trim($data['action']) : '';
 
 if ($action === 'analyze') {
     $text = isset($data['text']) ? trim($data['text']) : '';
+    $audio = isset($data['audio']) ? trim($data['audio']) : '';
+    $audio_mime = isset($data['audio_mime']) ? trim($data['audio_mime']) : '';
     $default_customer_id = isset($data['default_customer_id']) ? (int)$data['default_customer_id'] : 0;
     $default_assigned_to = isset($data['default_assigned_to']) ? (int)$data['default_assigned_to'] : 0;
 
-    if (empty($text)) {
-        echo json_encode(['success' => false, 'message' => 'O texto para análise não pode estar vazio.']);
+    if (empty($text) && empty($audio)) {
+        echo json_encode(['success' => false, 'message' => 'O texto ou o áudio para análise não pode estar vazio.']);
         exit;
     }
 
@@ -74,9 +76,13 @@ if ($action === 'analyze') {
     $agents_context = implode("\n", $agents_list);
 
     // Build the prompt for Gemini
-    $prompt = "Você é um assistente especializado em gestão de projetos da agência SyncDesk.\n" .
-              "Sua tarefa é analisar o texto abaixo (como atas de reuniões, e-mails, notas ou conversas) e extrair todas as tarefas acionáveis.\n\n" .
-              "Para cada tarefa identificada, você deve mapear o Cliente (Customer) e o Atendente Responsável (Agent) usando estritamente as listas abaixo. Se você não conseguir identificar com clareza o cliente ou o responsável para uma tarefa específica, use null ou os IDs padrões informados.\n\n" .
+    $prompt = "Você é um assistente especializado em gestão de projetos da agência SyncDesk.\n";
+    if (!empty($audio)) {
+        $prompt .= "Sua tarefa é analisar o áudio fornecido e extrair todas as tarefas acionáveis contidas nele.\n\n";
+    } else {
+        $prompt .= "Sua tarefa é analisar o texto abaixo (como atas de reuniões, e-mails, notas ou conversas) e extrair todas as tarefas acionáveis.\n\n";
+    }
+    $prompt .= "Para cada tarefa identificada, você deve mapear o Cliente (Customer) e o Atendente Responsável (Agent) usando estritamente as listas abaixo. Se você não conseguir identificar com clareza o cliente ou o responsável para uma tarefa específica, use null ou os IDs padrões informados.\n\n" .
               "CLIENTES DISPONÍVEIS (Selecione apenas a partir desta lista):\n" . (empty($customers_context) ? "Nenhum cliente disponível" : $customers_context) . "\n\n" .
               "ATENDENTES/RESPONSÁVEIS DISPONÍVEIS (Selecione apenas a partir desta lista):\n" . (empty($agents_context) ? "Nenhum responsável disponível" : $agents_context) . "\n\n" .
               "PADRÕES EM CASO DE DÚVIDA:\n" .
@@ -89,19 +95,31 @@ if ($action === 'analyze') {
               "   - 'description': Descrição detalhada do que fazer, em português.\n" .
               "   - 'priority': Prioridade sendo 'low' (baixa), 'medium' (média) ou 'high' (alta) com base no tom do texto.\n" .
               "   - 'customer_id': ID numérico do cliente selecionado da lista. Se não identificado e não houver padrão, retorne null.\n" .
-              "   - 'assigned_to': ID numérico do responsável selecionado da lista. Se não identificado e não houver padrão, retorne null.\n\n" .
-              "TEXTO PARA ANÁLISE:\n" . $text;
+              "   - 'assigned_to': ID numérico do responsável selecionado da lista. Se não identificado e não houver padrão, retorne null.\n\n";
+
+    if (empty($audio)) {
+        $prompt .= "TEXTO PARA ANÁLISE:\n" . $text;
+    }
 
     // Call Gemini API
     $model = "gemini-3.1-flash-lite";
     $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key=" . urlencode($apiKey);
 
+    $parts = [];
+    if (!empty($audio)) {
+        $parts[] = [
+            'inlineData' => [
+                'mimeType' => $audio_mime ?: 'audio/webm',
+                'data' => $audio
+            ]
+        ];
+    }
+    $parts[] = ['text' => $prompt];
+
     $payload = [
         'contents' => [
             [
-                'parts' => [
-                    ['text' => $prompt]
-                ]
+                'parts' => $parts
             ]
         ],
         'generationConfig' => [
