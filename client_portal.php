@@ -65,6 +65,35 @@ if (Input::exists()) {
             $errors[] = "Serviço inválido selecionado.";
         }
     }
+
+    // Validate preferred delivery date based on SLA (8 hours = 1 day)
+    if (!empty($preferred_delivery) && $service_data) {
+        $sla_hours = (int)$service_data->sla_hours;
+        $days_needed = (int)ceil($sla_hours / 8);
+        
+        // Calculate raw minimum date
+        $min_allowed_time = strtotime("+{$days_needed} days");
+        $min_day_of_week = (int)date('N', $min_allowed_time);
+        
+        // If the minimum allowed date falls on a weekend, push it to next Monday
+        if ($min_day_of_week === 6) { // Saturday
+            $min_allowed_time = strtotime("+2 days", $min_allowed_time);
+        } elseif ($min_day_of_week === 7) { // Sunday
+            $min_allowed_time = strtotime("+1 day", $min_allowed_time);
+        }
+        
+        $min_allowed_date = date('Y-m-d', $min_allowed_time);
+        
+        if ($preferred_delivery < $min_allowed_date) {
+            $errors[] = "A data de entrega preferencial não pode ser anterior a " . date('d/m/Y', strtotime($min_allowed_date)) . " para o serviço selecionado (SLA de {$sla_hours}h exige no mínimo {$days_needed} dias de antecedência, excluindo finais de semana).";
+        }
+        
+        // Block weekend delivery date selection directly
+        $day_of_week = (int)date('N', strtotime($preferred_delivery));
+        if ($day_of_week === 6 || $day_of_week === 7) {
+            $errors[] = "Finais de semana (sábado e domingo) não são permitidos como data de entrega preferencial. Por favor, selecione um dia útil.";
+        }
+    }
     
     // Validate contact belongs to this customer
     $contact_data = null;
@@ -464,9 +493,9 @@ function render_access_denied($msg) {
                         <div class="col-md-6">
                             <label for="service_id" class="form-label">Serviço Solicitado</label>
                             <select name="service_id" id="service_id" class="form-select" required>
-                                <option value="">Selecione o serviço desejado...</option>
+                                <option value="" data-sla="0">Selecione o serviço desejado...</option>
                                 <?php foreach ($services as $srv): ?>
-                                    <option value="<?= $srv->id ?>"><?= htmlspecialchars($srv->name) ?> (SLA: <?= $srv->sla_hours ?>h)</option>
+                                    <option value="<?= $srv->id ?>" data-sla="<?= $srv->sla_hours ?>"><?= htmlspecialchars($srv->name) ?> (SLA: <?= $srv->sla_hours ?>h)</option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
@@ -620,6 +649,83 @@ function render_access_denied($msg) {
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
+    // SLA constraint handler: restricts preferred delivery date based on service SLA (8h = 1 working day) and disables weekends
+    const serviceSelectInput = document.getElementById('service_id');
+    const preferredDeliveryInput = document.getElementById('preferred_delivery_date');
+
+    function updateMinDeliveryDate() {
+        if (!serviceSelectInput || !preferredDeliveryInput) return;
+        
+        const selectedOption = serviceSelectInput.options[serviceSelectInput.selectedIndex];
+        const slaHours = parseInt(selectedOption ? selectedOption.getAttribute('data-sla') : '0', 10) || 0;
+        let minDate = new Date();
+        
+        if (slaHours > 0) {
+            const daysToAdd = Math.ceil(slaHours / 8);
+            minDate.setDate(minDate.getDate() + daysToAdd);
+            
+            // If the minimum date falls on a weekend, push it to the next Monday
+            const minDay = minDate.getDay();
+            if (minDay === 6) { // Saturday
+                minDate.setDate(minDate.getDate() + 2);
+            } else if (minDay === 0) { // Sunday
+                minDate.setDate(minDate.getDate() + 1);
+            }
+        } else {
+            // Default to today if no service selected. If today is a weekend, default to Monday
+            const todayDay = minDate.getDay();
+            if (todayDay === 6) { // Saturday
+                minDate.setDate(minDate.getDate() + 2);
+            } else if (todayDay === 0) { // Sunday
+                minDate.setDate(minDate.getDate() + 1);
+            }
+        }
+        
+        const yyyy = minDate.getFullYear();
+        const mm = String(minDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(minDate.getDate()).padStart(2, '0');
+        const minDateString = `${yyyy}-${mm}-${dd}`;
+        
+        preferredDeliveryInput.min = minDateString;
+        
+        // Adjust current value if it falls before the new minimum date
+        if (preferredDeliveryInput.value && preferredDeliveryInput.value < minDateString) {
+            preferredDeliveryInput.value = minDateString;
+        }
+        
+        // Trigger weekend validation
+        validateWeekend();
+    }
+
+    function validateWeekend() {
+        if (!preferredDeliveryInput || !preferredDeliveryInput.value) return;
+        
+        const parts = preferredDeliveryInput.value.split('-');
+        const date = new Date(parts[0], parts[1] - 1, parts[2]);
+        const day = date.getDay(); // 0 = Sunday, 6 = Saturday
+        
+        if (day === 0 || day === 6) {
+            alert('Finais de semana (sábado e domingo) não são permitidos como data de entrega preferencial. Por favor, selecione um dia útil.');
+            preferredDeliveryInput.value = '';
+            preferredDeliveryInput.setCustomValidity('Finais de semana não são permitidos.');
+            preferredDeliveryInput.reportValidity();
+        } else {
+            preferredDeliveryInput.setCustomValidity('');
+        }
+    }
+
+    if (serviceSelectInput) {
+        serviceSelectInput.addEventListener('change', updateMinDeliveryDate);
+    }
+    
+    if (preferredDeliveryInput) {
+        preferredDeliveryInput.addEventListener('input', validateWeekend);
+        preferredDeliveryInput.addEventListener('change', validateWeekend);
+    }
+    
+    // Initialize on load
+    updateMinDeliveryDate();
+
     // JS Preview file selections helper
     const attachmentInput = document.getElementById('attachments');
     const fileListPreview = document.getElementById('fileListPreview');
