@@ -47,16 +47,43 @@ if ($action === 'analyze') {
     $agents_query = $db->query("SELECT id, fname, lname, username FROM users WHERE active = 1 ORDER BY fname ASC, username ASC");
     $agents = $agents_query->results();
 
-    // Retrieve Gemini API Key
-    $apiKey = getenv('GEMINI_API_KEY');
-    if (empty($apiKey) && defined('GEMINI_API_KEY')) {
-        $apiKey = GEMINI_API_KEY;
+    // Retrieve keys from system_settings database table
+    $openaiKey = "";
+    $geminiKey = "";
+
+    // Check if table system_settings exists
+    $table_check = $db->query("SHOW TABLES LIKE 'system_settings'");
+    if ($table_check->count() > 0) {
+        $openai_query = $db->query("SELECT setting_value FROM system_settings WHERE setting_key = 'openai_api_key' LIMIT 1");
+        if ($openai_query->count() > 0) {
+            $openaiKey = trim($openai_query->first()->setting_value);
+        }
+        
+        $gemini_query = $db->query("SELECT setting_value FROM system_settings WHERE setting_key = 'gemini_api_key' LIMIT 1");
+        if ($gemini_query->count() > 0) {
+            $geminiKey = trim($gemini_query->first()->setting_value);
+        }
     }
 
-    if (empty($apiKey)) {
+    // Fallbacks
+    if (empty($openaiKey)) {
+        $openaiKey = getenv('OPENAI_API_KEY');
+        if (empty($openaiKey) && defined('OPENAI_API_KEY')) {
+            $openaiKey = OPENAI_API_KEY;
+        }
+    }
+
+    if (empty($geminiKey)) {
+        $geminiKey = getenv('GEMINI_API_KEY');
+        if (empty($geminiKey) && defined('GEMINI_API_KEY')) {
+            $geminiKey = GEMINI_API_KEY;
+        }
+    }
+
+    if (empty($openaiKey) && empty($geminiKey)) {
         echo json_encode([
             'success' => false,
-            'message' => 'Chave de API do Gemini (GEMINI_API_KEY) não configurada. Por favor, defina-a nas variáveis de ambiente ou no arquivo custom_functions.php.'
+            'message' => 'Nenhuma chave de API configurada. Por favor, acesse a página de Integrações e cadastre suas chaves da OpenAI ou do Gemini.'
         ]);
         exit;
     }
@@ -97,69 +124,214 @@ if ($action === 'analyze') {
               "   - 'customer_id': ID numérico do cliente selecionado da lista. Se não identificado e não houver padrão, retorne null.\n" .
               "   - 'assigned_to': ID numérico do responsável selecionado da lista. Se não identificado e não houver padrão, retorne null.\n\n";
 
-    if (empty($audio)) {
-        $prompt .= "TEXTO PARA ANÁLISE:\n" . $text;
-    }
+    $aiText = "";
 
-    // Call Gemini API
-    $model = "gemini-3.1-flash-lite";
-    $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key=" . urlencode($apiKey);
+    if (!empty($openaiKey)) {
+        // ==========================================
+        // OPENAI INTEGRATION
+        // ==========================================
+        
+        // 1. Check if we need to transcribe audio
+        if (!empty($audio)) {
+            // Save base64 audio to temp file
+            $ext = 'webm';
+            if (!empty($audio_mime)) {
+                $mime_parts = explode('/', $audio_mime);
+                if (count($mime_parts) === 2) {
+                    $ext = $mime_parts[1];
+                    $ext = explode(';', $ext)[0];
+                }
+            }
 
-    $parts = [];
-    if (!empty($audio)) {
-        $parts[] = [
-            'inlineData' => [
-                'mimeType' => $audio_mime ?: 'audio/webm',
-                'data' => $audio
+            $audio_data = base64_decode($audio);
+            if ($audio_data === false) {
+                echo json_encode(['success' => false, 'message' => 'Falha ao decodificar dados de áudio em Base64 para OpenAI.']);
+                exit;
+            }
+
+            $temp_dir = __DIR__ . '/uploads/temp';
+            if (!is_dir($temp_dir)) {
+                mkdir($temp_dir, 0777, true);
+            }
+            $temp_filename = $temp_dir . '/transcription_' . uniqid() . '.' . $ext;
+            file_put_contents($temp_filename, $audio_data);
+
+            // Call Whisper API
+            $whisper_url = "https://api.openai.com/v1/audio/transcriptions";
+            $cFile = new CURLFile($temp_filename, $audio_mime ?: 'audio/webm', basename($temp_filename));
+            
+            $whisper_payload = [
+                'file' => $cFile,
+                'model' => 'whisper-1'
+            ];
+
+            $ch = curl_init($whisper_url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $whisper_payload);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'Authorization: Bearer ' . $openaiKey
+            ]);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+            
+            $whisper_response = curl_exec($ch);
+            $whisper_httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $whisper_curlError = curl_error($ch);
+            curl_close($ch);
+
+            // Delete temp file
+            if (file_exists($temp_filename)) {
+                unlink($temp_filename);
+            }
+
+            if ($whisper_curlError) {
+                echo json_encode(['success' => false, 'message' => 'Erro de conexão com o OpenAI Whisper: ' . $whisper_curlError]);
+                exit;
+            }
+
+            if ($whisper_httpCode !== 200) {
+                echo json_encode(['success' => false, 'message' => 'Erro da API OpenAI Whisper (HTTP ' . $whisper_httpCode . '): ' . $whisper_response]);
+                exit;
+            }
+
+            $whisper_data = json_decode($whisper_response, true);
+            $text = isset($whisper_data['text']) ? trim($whisper_data['text']) : '';
+
+            if (empty($text)) {
+                echo json_encode(['success' => false, 'message' => 'O áudio fornecido foi processado, mas nenhuma fala foi identificada.']);
+                exit;
+            }
+        }
+
+        // 2. Call OpenAI Chat Completion
+        $openai_url = "https://api.openai.com/v1/chat/completions";
+        
+        // Adapt the prompt to ensure OpenAI returns a tasks object
+        $openai_prompt = $prompt . "\n\nRetorne as tarefas no formato JSON com um objeto contendo uma chave 'tasks' que é um array com as tarefas extraídas.";
+        $openai_prompt .= "\n\nTEXTO PARA ANÁLISE:\n" . $text;
+
+        $messages = [
+            [
+                'role' => 'system',
+                'content' => 'Você é um assistente especializado em gestão de projetos da agência SyncDesk. Retorne sempre um objeto JSON contendo um array de tarefas na chave \'tasks\'.'
+            ],
+            [
+                'role' => 'user',
+                'content' => $openai_prompt
             ]
         ];
-    }
-    $parts[] = ['text' => $prompt];
 
-    $payload = [
-        'contents' => [
-            [
-                'parts' => $parts
+        $openai_payload = [
+            'model' => 'gpt-4o-mini',
+            'messages' => $messages,
+            'response_format' => ['type' => 'json_object'],
+            'temperature' => 0.1
+        ];
+
+        $ch = curl_init($openai_url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($openai_payload));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . $openaiKey
+        ]);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+
+        if ($curlError) {
+            echo json_encode(['success' => false, 'message' => 'Erro de conexão com a API da OpenAI: ' . $curlError]);
+            exit;
+        }
+
+        if ($httpCode !== 200) {
+            echo json_encode(['success' => false, 'message' => 'Erro da API da OpenAI (HTTP ' . $httpCode . '): ' . $response]);
+            exit;
+        }
+
+        $resDecoded = json_decode($response, true);
+        if (!isset($resDecoded['choices'][0]['message']['content'])) {
+            echo json_encode(['success' => false, 'message' => 'A resposta da API da OpenAI veio em formato inesperado.']);
+            exit;
+        }
+
+        $aiText = trim($resDecoded['choices'][0]['message']['content']);
+
+    } else {
+        // ==========================================
+        // GEMINI INTEGRATION (FALLBACK)
+        // ==========================================
+        
+        if (empty($audio)) {
+            $prompt .= "TEXTO PARA ANÁLISE:\n" . $text;
+        }
+
+        $model = "gemini-3.1-flash-lite";
+        $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key=" . urlencode($geminiKey);
+
+        $parts = [];
+        if (!empty($audio)) {
+            $parts[] = [
+                'inlineData' => [
+                    'mimeType' => $audio_mime ?: 'audio/webm',
+                    'data' => $audio
+                ]
+            ];
+        }
+        $parts[] = ['text' => $prompt];
+
+        $payload = [
+            'contents' => [
+                [
+                    'parts' => $parts
+                ]
+            ],
+            'generationConfig' => [
+                'responseMimeType' => 'application/json'
             ]
-        ],
-        'generationConfig' => [
-            'responseMimeType' => 'application/json'
-        ]
-    ];
+        ];
 
-    $ch = curl_init($url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 20);
 
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch);
-    curl_close($ch);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
 
-    if ($curlError) {
-        echo json_encode(['success' => false, 'message' => 'Erro de conexão com a API do Gemini: ' . $curlError]);
-        exit;
+        if ($curlError) {
+            echo json_encode(['success' => false, 'message' => 'Erro de conexão com a API do Gemini: ' . $curlError]);
+            exit;
+        }
+
+        if ($httpCode !== 200) {
+            echo json_encode(['success' => false, 'message' => 'Erro da API do Gemini (HTTP ' . $httpCode . '): ' . $response]);
+            exit;
+        }
+
+        $resDecoded = json_decode($response, true);
+        if (!isset($resDecoded['candidates'][0]['content']['parts'][0]['text'])) {
+            echo json_encode(['success' => false, 'message' => 'A resposta da API do Gemini veio em formato inesperado.']);
+            exit;
+        }
+
+        $aiText = trim($resDecoded['candidates'][0]['content']['parts'][0]['text']);
+        if (preg_match('/^```json(.*)```$/s', $aiText, $matches)) {
+            $aiText = trim($matches[1]);
+        }
     }
 
-    if ($httpCode !== 200) {
-        echo json_encode(['success' => false, 'message' => 'Erro da API do Gemini (HTTP ' . $httpCode . '): ' . $response]);
-        exit;
-    }
-
-    $resDecoded = json_decode($response, true);
-    if (!isset($resDecoded['candidates'][0]['content']['parts'][0]['text'])) {
-        echo json_encode(['success' => false, 'message' => 'A resposta da API do Gemini veio em formato inesperado.']);
-        exit;
-    }
-
-    $aiText = trim($resDecoded['candidates'][0]['content']['parts'][0]['text']);
-    if (preg_match('/^```json(.*)```$/s', $aiText, $matches)) {
-        $aiText = trim($matches[1]);
-    }
-
+    // ==========================================
+    // PARSING RESULTS
+    // ==========================================
     $tasks = json_decode($aiText, true);
     if (json_last_error() !== JSON_ERROR_NONE) {
         echo json_encode([
@@ -168,6 +340,11 @@ if ($action === 'analyze') {
             'raw' => $aiText
         ]);
         exit;
+    }
+
+    // Extract list from wrapper object if needed (e.g. from OpenAI)
+    if (isset($tasks['tasks']) && is_array($tasks['tasks'])) {
+        $tasks = $tasks['tasks'];
     }
 
     // Return tasks, plus customer and agent list so the frontend can populate selections

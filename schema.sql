@@ -111,3 +111,19 @@ INSERT INTO `tasks` (`id`, `customer_id`, `assigned_to`, `title`, `description`,
 (5, 1, 2, 'Configurar relatórios personalizados', 'Gerar relatórios de desempenho dos fluxos n8n da Empresa ABC para exportação mensal.', 'medium', 'in_progress'),
 (6, 2, 2, 'Migrar dados do sistema antigo', 'Importar dados de clientes antigos para a base de dados ativa da Tech Solutions de forma segura.', 'high', 'completed')
 ON DUPLICATE KEY UPDATE `customer_id`=VALUES(`customer_id`), `assigned_to`=VALUES(`assigned_to`), `title`=VALUES(`title`), `description`=VALUES(`description`), `priority`=VALUES(`priority`), `status`=VALUES(`status`);
+
+-- 5. System Settings Table (API Keys and Configurations)
+CREATE TABLE IF NOT EXISTS `system_settings` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `setting_key` VARCHAR(255) NOT NULL UNIQUE,
+  `setting_value` TEXT DEFAULT NULL,
+  `description` VARCHAR(255) DEFAULT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Seed default API keys settings
+INSERT IGNORE INTO `system_settings` (`setting_key`, `setting_value`, `description`) VALUES
+('openai_api_key', '', 'Chave de API da OpenAI para processamento de tarefas em lote'),
+('gemini_api_key', '', 'Chave de API do Gemini para processamento de tarefas em lote');
+

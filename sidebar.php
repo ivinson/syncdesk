@@ -265,6 +265,14 @@ $sb_current_page = basename($_SERVER['PHP_SELF']);
             </a>
         </li>
         
+        <!-- 9. Integrações (Active) -->
+        <li class="menu-item">
+            <a href="integrations.php" class="menu-link <?= $sb_current_page == 'integrations.php' ? 'active' : '' ?>">
+                <i class="bi bi-plug"></i>
+                <span>Integrações</span>
+            </a>
+        </li>
+
         <!-- 9. Configurações (Active - Admin Only) -->
         <?php if ($sb_is_admin): ?>
             <li class="menu-item">
