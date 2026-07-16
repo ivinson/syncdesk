@@ -2,8 +2,8 @@
 // integrations.php - API Integration and Keys Management Hub
 require_once 'users/init.php';
 
-// Force strict logged in session check
-if (!isset($user) || !$user->isLoggedIn()) {
+// Force strict administrator session check
+if (!isset($user) || !$user->isLoggedIn() || !hasPerm([2], $user->data()->id)) {
     Redirect::to('index.php');
 }
 
@@ -183,7 +183,7 @@ if ($openai_query->count() > 0) {
             <div>
                 <nav aria-label="breadcrumb">
                     <ol class="breadcrumb mb-1" style="font-size:0.8rem;">
-                        <li class="breadcrumb-item"><a href="index.php" class="text-decoration-none">Dashboard</a></li>
+                        <li class="breadcrumb-item"><a href="settings.php" class="text-decoration-none">Configurações</a></li>
                         <li class="breadcrumb-item active" aria-current="page">Integrações</li>
                     </ol>
                 </nav>

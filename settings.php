@@ -188,6 +188,16 @@ $db = DB::getInstance();
                 </div>
                 <a href="manage_customer_agents.php" class="btn-action">Mapear Contas</a>
             </div>
+
+            <!-- 5. Integrações & APIs -->
+            <div class="settings-card">
+                <div>
+                    <div class="card-icon"><i class="bi bi-plug"></i></div>
+                    <h5 class="card-title">Integrações & APIs</h5>
+                    <p class="card-desc">Gerencie as chaves de API utilizadas para inteligência artificial, Whisper e processamento de tarefas em lote.</p>
+                </div>
+                <a href="integrations.php" class="btn-action">Configurar APIs</a>
+            </div>
         </div>
     </div>
 
