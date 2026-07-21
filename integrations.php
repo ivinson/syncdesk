@@ -11,35 +11,9 @@ $db = DB::getInstance();
 $error_msg = "";
 $success_msg = "";
 
-// ==========================================
-// SELF-HEALING DATABASE STRUCTURE
-// ==========================================
-$db->query("CREATE TABLE IF NOT EXISTS `system_settings` (
-  `id` INT AUTO_INCREMENT PRIMARY KEY,
-  `setting_key` VARCHAR(255) NOT NULL UNIQUE,
-  `setting_value` TEXT DEFAULT NULL,
-  `description` VARCHAR(255) DEFAULT NULL,
-  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
-
-// Seed default settings if not exists
-$checkOpenAi = $db->query("SELECT id FROM system_settings WHERE setting_key = 'openai_api_key'");
-if ($checkOpenAi->count() == 0) {
-    $db->insert('system_settings', [
-        'setting_key' => 'openai_api_key',
-        'setting_value' => '',
-        'description' => 'Chave de API da OpenAI para processamento de tarefas em lote'
-    ]);
-}
-
-$checkGemini = $db->query("SELECT id FROM system_settings WHERE setting_key = 'gemini_api_key'");
-if ($checkGemini->count() == 0) {
-    $db->insert('system_settings', [
-        'setting_key' => 'gemini_api_key',
-        'setting_value' => '',
-        'description' => 'Chave de API do Gemini para processamento de tarefas em lote'
-    ]);
+// Ensure notification tables and default settings exist
+if (function_exists('initNotificationTables')) {
+    initNotificationTables();
 }
 
 // ==========================================
@@ -47,34 +21,82 @@ if ($checkGemini->count() == 0) {
 // ==========================================
 if (Input::exists()) {
     if (Token::check(Input::get('csrf'))) {
-        $openai_key = trim(Input::get('openai_api_key'));
+        $action = Input::get('action');
 
-        $updateOpenAi = $db->query("UPDATE system_settings SET setting_value = ? WHERE setting_key = 'openai_api_key'", [$openai_key]);
-
-        if ($updateOpenAi) {
-            $success_msg = "Configurações de chaves de API salvas com sucesso!";
+        if ($action === 'test_whatsapp') {
+            $test_phone = trim(Input::get('test_phone'));
+            if (empty($test_phone)) {
+                $error_msg = "Informe um número de telefone com DDI e DDD para o teste.";
+            } else {
+                $res = dispatchWhatsAppApiMessage($test_phone, "Administrador (Teste)", "Tarefa de Teste SyncDesk", "efetuou um teste de notificação");
+                if ($res['success']) {
+                    $success_msg = "Mensagem de teste enviada com sucesso para {$test_phone}!";
+                } else {
+                    $error_msg = "Falha no envio do teste: " . $res['message'];
+                }
+            }
         } else {
-            $error_msg = "Falha ao atualizar as configurações no banco de dados.";
+            // Save main settings
+            $openai_key = trim(Input::get('openai_api_key'));
+            $wa_mode = trim(Input::get('whatsapp_api_mode'));
+            $wa_backend = trim(Input::get('whatsapp_backend_url'));
+            $wa_token = trim(Input::get('whatsapp_api_token'));
+            $wa_tpl_name = trim(Input::get('whatsapp_meta_template_name'));
+            $wa_tpl_lang = trim(Input::get('whatsapp_meta_template_lang'));
+            $wa_open_ticket = trim(Input::get('whatsapp_open_ticket'));
+            $wa_queue_id = trim(Input::get('whatsapp_queue_id'));
+
+            $settings_to_update = [
+                'openai_api_key' => $openai_key,
+                'whatsapp_api_mode' => $wa_mode,
+                'whatsapp_backend_url' => $wa_backend,
+                'whatsapp_api_token' => $wa_token,
+                'whatsapp_meta_template_name' => $wa_tpl_name,
+                'whatsapp_meta_template_lang' => $wa_tpl_lang,
+                'whatsapp_open_ticket' => $wa_open_ticket,
+                'whatsapp_queue_id' => $wa_queue_id
+            ];
+
+            $all_ok = true;
+            foreach ($settings_to_update as $key => $val) {
+                $check = $db->query("SELECT id FROM system_settings WHERE setting_key = ?", [$key]);
+                if ($check->count() > 0) {
+                    $upd = $db->query("UPDATE system_settings SET setting_value = ? WHERE setting_key = ?", [$val, $key]);
+                    if (!$upd) $all_ok = false;
+                } else {
+                    $ins = $db->insert('system_settings', ['setting_key' => $key, 'setting_value' => $val]);
+                    if (!$ins) $all_ok = false;
+                }
+            }
+
+            if ($all_ok) {
+                $success_msg = "Configurações de integrações salvas com sucesso!";
+            } else {
+                $error_msg = "Falha ao atualizar algumas configurações no banco de dados.";
+            }
         }
     } else {
         $error_msg = "Erro: Validação CSRF falhou. Recarregue a página.";
     }
 }
 
-// Fetch current keys
-$openai_current = "";
+// Fetch current setting values
+$openai_current = getSystemSetting('openai_api_key', '');
+$wa_mode_current = getSystemSetting('whatsapp_api_mode', 'official');
+$wa_backend_current = getSystemSetting('whatsapp_backend_url', 'https://sync.triadgroup.com.br');
+$wa_token_current = getSystemSetting('whatsapp_api_token', '##triad@##neurosculpt');
+$wa_tpl_name_current = getSystemSetting('whatsapp_meta_template_name', 'vars_001');
+$wa_tpl_lang_current = getSystemSetting('whatsapp_meta_template_lang', 'pt_BR');
+$wa_open_ticket_current = getSystemSetting('whatsapp_open_ticket', '0');
+$wa_queue_id_current = getSystemSetting('whatsapp_queue_id', '0');
 
-$openai_query = $db->query("SELECT setting_value FROM system_settings WHERE setting_key = 'openai_api_key' LIMIT 1");
-if ($openai_query->count() > 0) {
-    $openai_current = $openai_query->first()->setting_value;
-}
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SyncDesk - Integrações e Chaves de API</title>
+    <title>SyncDesk - Integrações e APIs</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -117,11 +139,13 @@ if ($openai_query->count() > 0) {
             border-radius: 16px;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
             padding: 2rem;
+            margin-bottom: 2rem;
         }
 
         .btn-primary-axis {
             background-color: #e11d48;
             border-color: #e11d48;
+            color: #ffffff;
             font-weight: 600;
             border-radius: 8px;
             font-size: 0.9rem;
@@ -132,6 +156,7 @@ if ($openai_query->count() > 0) {
         .btn-primary-axis:hover {
             background-color: #be123c;
             border-color: #be123c;
+            color: #ffffff;
         }
 
         .input-group-text-axis {
@@ -141,34 +166,24 @@ if ($openai_query->count() > 0) {
             cursor: pointer;
         }
         
-        .form-control-axis {
+        .form-control-axis, .form-select-axis {
             border-color: #cbd5e1;
             padding: 0.6rem 0.8rem;
             font-size: 0.9rem;
             border-radius: 8px;
         }
 
-        .form-control-axis:focus {
+        .form-control-axis:focus, .form-select-axis:focus {
             border-color: #e11d48;
             box-shadow: 0 0 0 0.2rem rgba(225, 29, 72, 0.15);
         }
 
-        .provider-badge {
-            font-size: 0.75rem;
-            padding: 0.3rem 0.6rem;
-            border-radius: 6px;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .badge-openai {
-            background-color: #10a37f;
-            color: #ffffff;
-        }
-
-        .badge-gemini {
-            background-color: #4285f4;
-            color: #ffffff;
+        .api-mode-box {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 1rem;
+            margin-bottom: 1.25rem;
         }
     </style>
 </head>
@@ -206,23 +221,116 @@ if ($openai_query->count() > 0) {
             </div>
         <?php endif; ?>
 
-        <!-- Key Management Card -->
         <div class="row">
-            <div class="col-lg-8">
-                <div class="integration-card">
-                    <h5 class="fw-bold mb-3 text-slate-800"><i class="bi bi-key me-2 text-danger"></i> Chaves de API de Inteligência Artificial</h5>
-                    <p class="text-muted small mb-4">
-                        Configure as credenciais das IAs utilizadas no sistema. O SyncDesk utiliza as chaves abaixo para realizar a identificação e criação de tarefas em lote (via texto ou gravação de áudio).
-                    </p>
+            <div class="col-lg-10">
+                <form method="POST" action="">
+                    <input type="hidden" name="csrf" value="<?= Token::generate() ?>">
+                    <input type="hidden" name="action" value="save_settings">
 
-                    <form method="POST" action="">
-                        <input type="hidden" name="csrf" value="<?= Token::generate() ?>">
+                    <!-- 1. API WhatsApp Settings Card -->
+                    <div class="integration-card">
+                        <div class="d-flex align-items-center justify-content-between mb-3">
+                            <h5 class="fw-bold m-0 text-slate-800">
+                                <i class="bi bi-whatsapp me-2 text-success"></i> Gateway de Notificações WhatsApp
+                            </h5>
+                            <span class="badge bg-success-subtle text-success border border-success-subtle px-2.5 py-1">Ativo</span>
+                        </div>
+                        <p class="text-muted small mb-4">
+                            Configure o servidor e a chave de autenticação para envio automático de alertas via WhatsApp quando houver movimentações em tarefas (criação, troca de status, comentários e finalização).
+                        </p>
+
+                        <!-- Radio Choice API Mode -->
+                        <div class="api-mode-box mb-4">
+                            <label class="form-label fw-semibold text-slate-700 d-block mb-2">Tipo de API de WhatsApp</label>
+                            <div class="d-flex flex-wrap gap-4">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="whatsapp_api_mode" id="mode_official" value="official" <?= $wa_mode_current === 'official' ? 'checked' : '' ?> onchange="toggleApiModeFields()">
+                                    <label class="form-check-label fw-medium" for="mode_official">
+                                        <i class="bi bi-patch-check-fill text-primary me-1"></i> API Oficial Meta Custom Template (`sendMetaCustom`)
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="whatsapp_api_mode" id="mode_qrcode" value="qrcode" <?= $wa_mode_current === 'qrcode' ? 'checked' : '' ?> onchange="toggleApiModeFields()">
+                                    <label class="form-check-label fw-medium" for="mode_qrcode">
+                                        <i class="bi bi-qr-code text-dark me-1"></i> API Não-Oficial / QR Code (`send`)
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row g-3">
+                            <!-- Backend URL -->
+                            <div class="col-md-7">
+                                <label for="whatsapp_backend_url" class="form-label fw-semibold text-slate-700">URL Backend da API</label>
+                                <div class="input-group">
+                                    <span class="input-group-text input-group-text-axis"><i class="bi bi-link-45deg"></i></span>
+                                    <input type="url" name="whatsapp_backend_url" id="whatsapp_backend_url" class="form-control form-control-axis" placeholder="https://sync.triadgroup.com.br" value="<?= htmlspecialchars($wa_backend_current) ?>" required>
+                                </div>
+                                <div class="form-text" style="font-size:0.75rem;">Endereço base do seu servidor de mensageria (sem barra no final).</div>
+                            </div>
+
+                            <!-- API Token -->
+                            <div class="col-md-5">
+                                <label for="whatsapp_api_token" class="form-label fw-semibold text-slate-700">Token de Autenticação (Bearer)</label>
+                                <div class="input-group">
+                                    <span class="input-group-text input-group-text-axis"><i class="bi bi-shield-lock"></i></span>
+                                    <input type="password" name="whatsapp_api_token" id="whatsapp_api_token" class="form-control form-control-axis" value="<?= htmlspecialchars($wa_token_current) ?>" placeholder="##triad@##neurosculpt" required>
+                                    <button type="button" class="btn btn-outline-secondary input-group-text-axis" onclick="toggleVisibility('whatsapp_api_token', this)">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Open Ticket & Queue ID -->
+                            <div class="col-md-6">
+                                <label for="whatsapp_open_ticket" class="form-label fw-semibold text-slate-700">Abrir Ticket no Envio?</label>
+                                <select name="whatsapp_open_ticket" id="whatsapp_open_ticket" class="form-select form-select-axis">
+                                    <option value="0" <?= $wa_open_ticket_current == '0' ? 'selected' : '' ?>>0 - Não abre ticket (Recomendado para Notificações)</option>
+                                    <option value="1" <?= $wa_open_ticket_current == '1' ? 'selected' : '' ?>>1 - Abre ticket de atendimento</option>
+                                </select>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label for="whatsapp_queue_id" class="form-label fw-semibold text-slate-700">ID da Fila (Queue ID)</label>
+                                <input type="number" name="whatsapp_queue_id" id="whatsapp_queue_id" class="form-control form-control-axis" value="<?= htmlspecialchars($wa_queue_id_current) ?>" placeholder="0">
+                                <div class="form-text" style="font-size:0.75rem;">Defina o ID caso queira direcionar o ticket a uma fila.</div>
+                            </div>
+                        </div>
+
+                        <!-- Meta Official Template Specific Section -->
+                        <div id="meta_template_fields" class="mt-4 p-3 bg-light border rounded-3" style="<?= $wa_mode_current === 'official' ? '' : 'display:none;' ?>">
+                            <h6 class="fw-bold text-slate-800 mb-3"><i class="bi bi-sliders me-1 text-primary"></i> Parâmetros do Template Oficial da Meta</h6>
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label for="whatsapp_meta_template_name" class="form-label fw-semibold text-slate-700">Nome do Template Meta (`name`)</label>
+                                    <input type="text" name="whatsapp_meta_template_name" id="whatsapp_meta_template_name" class="form-control form-control-axis" value="<?= htmlspecialchars($wa_tpl_name_current) ?>" placeholder="vars_001">
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="whatsapp_meta_template_lang" class="form-label fw-semibold text-slate-700">Idioma (`language`)</label>
+                                    <input type="text" name="whatsapp_meta_template_lang" id="whatsapp_meta_template_lang" class="form-control form-control-axis" value="<?= htmlspecialchars($wa_tpl_lang_current) ?>" placeholder="pt_BR">
+                                </div>
+                            </div>
+                            <div class="alert alert-info mb-0 mt-3 p-2.5 d-flex align-items-center gap-2" style="font-size: 0.8rem;">
+                                <i class="bi bi-info-circle-fill fs-5 flex-shrink-0 text-info"></i>
+                                <div>
+                                    <strong>Estrutura de Variáveis do Body Meta:</strong> O SyncDesk preencherá automaticamente as 2 variáveis exigidas na ordem:
+                                    <br>• Variável 1 (`{{1}}`): Nome de quem alterou o status / criou o comentário / finalizou a tarefa.
+                                    <br>• Variável 2 (`{{2}}`): Título / Nome da Tarefa.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2. AI Key Management Card -->
+                    <div class="integration-card">
+                        <h5 class="fw-bold mb-3 text-slate-800"><i class="bi bi-key me-2 text-danger"></i> Chaves de API de Inteligência Artificial</h5>
+                        <p class="text-muted small mb-4">
+                            Configure as credenciais das IAs utilizadas no sistema. O SyncDesk utiliza as chaves abaixo para realizar a identificação e criação de tarefas em lote (via texto ou gravação de áudio).
+                        </p>
 
                         <!-- OpenAI API Key -->
-                        <div class="mb-4">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <label for="openai_api_key" class="form-label fw-semibold text-slate-700 m-0">OpenAI API Key</label>
-                            </div>
+                        <div class="mb-3">
+                            <label for="openai_api_key" class="form-label fw-semibold text-slate-700">OpenAI API Key</label>
                             <div class="input-group">
                                 <span class="input-group-text input-group-text-axis"><i class="bi bi-key"></i></span>
                                 <input type="password" name="openai_api_key" id="openai_api_key" class="form-control form-control-axis" placeholder="sk-proj-..." value="<?= htmlspecialchars($openai_current) ?>">
@@ -230,17 +338,38 @@ if ($openai_query->count() > 0) {
                                     <i class="bi bi-eye"></i>
                                 </button>
                             </div>
-                            <div class="form-text text-muted" style="font-size:0.75rem;">
-                                Utilizado para transcrição de áudio com o Whisper e extração estruturada de tarefas com GPT-4o-mini.
-                            </div>
                         </div>
 
                         <hr class="my-4 text-slate-200">
 
                         <div class="d-flex justify-content-end">
                             <button type="submit" class="btn btn-primary btn-primary-axis">
-                                <i class="bi bi-save me-1"></i> Salvar Integrações
+                                <i class="bi bi-save me-1"></i> Salvar Todas as Integrações
                             </button>
+                        </div>
+                    </div>
+                </form>
+
+                <!-- 3. WhatsApp Test Dispatch Card -->
+                <div class="integration-card">
+                    <h5 class="fw-bold mb-2 text-slate-800"><i class="bi bi-send-check me-2 text-primary"></i> Testar Conexão do WhatsApp</h5>
+                    <p class="text-muted small mb-3">
+                        Envie uma mensagem de teste para verificar se o backend e o token configurados acima estão enviando as notificações corretamente.
+                    </p>
+                    <form method="POST" action="">
+                        <input type="hidden" name="csrf" value="<?= Token::generate() ?>">
+                        <input type="hidden" name="action" value="test_whatsapp">
+
+                        <div class="row align-items-end g-3">
+                            <div class="col-md-7">
+                                <label for="test_phone" class="form-label fw-semibold text-slate-700">Telefone Destino (DDI + DDD + Número)</label>
+                                <input type="text" name="test_phone" id="test_phone" class="form-control form-control-axis" placeholder="5511999999999" required>
+                            </div>
+                            <div class="col-md-5">
+                                <button type="submit" class="btn btn-outline-success w-100 fw-semibold" style="border-radius:8px; padding:0.6rem;">
+                                    <i class="bi bi-whatsapp me-1"></i> Enviar Mensagem de Teste
+                                </button>
+                            </div>
                         </div>
                     </form>
                 </div>
@@ -263,6 +392,14 @@ if ($openai_query->count() > 0) {
                 input.type = 'password';
                 icon.classList.remove('bi-eye-slash');
                 icon.classList.add('bi-eye');
+            }
+        }
+
+        function toggleApiModeFields() {
+            const isOfficial = document.getElementById('mode_official').checked;
+            const metaFields = document.getElementById('meta_template_fields');
+            if (metaFields) {
+                metaFields.style.display = isOfficial ? 'block' : 'none';
             }
         }
     </script>

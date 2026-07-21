@@ -9,7 +9,7 @@ if (isset($dest) && !empty($dest)) {
     // User was redirected to login from a protected page - send them back there
     Redirect::sanitized($dest);
 } elseif (hasPerm([2], $user->data()->id)) {
-    Redirect::to($us_url_root . 'users/admin.php');
+    Redirect::to($us_url_root . 'index.php');
 } else {
     Redirect::to($us_url_root . $settings->redirect_uri_after_login);
 }

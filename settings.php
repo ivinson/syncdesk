@@ -198,6 +198,16 @@ $db = DB::getInstance();
                 </div>
                 <a href="integrations.php" class="btn-action">Configurar APIs</a>
             </div>
+
+            <!-- 6. Admin UserSpice -->
+            <div class="settings-card">
+                <div>
+                    <div class="card-icon"><i class="bi bi-shield-lock"></i></div>
+                    <h5 class="card-title">Admin UserSpice</h5>
+                    <p class="card-desc">Gerencie usuários, níveis de permissão, páginas do sistema e configurações de segurança nativas do UserSpice.</p>
+                </div>
+                <a href="users/admin.php" class="btn-action">Acessar Painel</a>
+            </div>
         </div>
     </div>
 

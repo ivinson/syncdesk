@@ -257,9 +257,9 @@ $sb_current_page = basename($_SERVER['PHP_SELF']);
             </a>
         </li>
         
-        <!-- 8. Notificações (Disabled) -->
-        <li class="menu-item disabled-menu">
-            <a href="#" class="menu-link" tabindex="-1" aria-disabled="true">
+        <!-- 8. Notificações (Active) -->
+        <li class="menu-item">
+            <a href="user_notifications.php" class="menu-link <?= $sb_current_page == 'user_notifications.php' ? 'active' : '' ?>">
                 <i class="bi bi-bell"></i>
                 <span>Notificações</span>
             </a>

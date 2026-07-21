@@ -23,3 +23,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //bold("<br><br>custom helpers included");
 
 define('GEMINI_API_KEY', 'your_gemini_api_key_here');
+
+// Auto-include SyncDesk notification helper
+if (file_exists(__DIR__ . '/../../includes/notifications_helper.php')) {
+    require_once __DIR__ . '/../../includes/notifications_helper.php';
+}

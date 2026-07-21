@@ -67,6 +67,10 @@ if (Input::exists()) {
                         $db->query("UPDATE tasks SET status = ? WHERE id = ?", [$new_status, $task_id]);
                         $status_label = $new_status == 'pending' ? 'Pendente' : ($new_status == 'in_progress' ? 'Em andamento' : 'Concluído');
                         
+                        if (function_exists('sendWhatsAppNotification')) {
+                            sendWhatsAppNotification($task_data->assigned_to, $user_id, $task_data->title, "alterou o status para '{$status_label}' na tarefa");
+                        }
+                        
                         if (Input::get('ajax')) {
                             header('Content-Type: application/json');
                             echo json_encode([
@@ -146,6 +150,11 @@ if (Input::exists()) {
                     'status' => 'pending',
                     'deadline' => $deadline_val
                 ]);
+
+                if (function_exists('sendWhatsAppNotification')) {
+                    sendWhatsAppNotification($assigned_to, $user_id, $title, "atribuiu a você a nova tarefa");
+                }
+
                 Redirect::to('kanban.php?success=' . urlencode("Tarefa '{$title}' criada com sucesso!"));
             } else {
                 $error_msg = implode("<br>", $errors);
@@ -195,6 +204,12 @@ if (Input::exists()) {
                         $db->query("UPDATE tasks SET customer_id = ?, assigned_to = ?, title = ?, description = ?, priority = ?, status = ?, deadline = ? WHERE id = ?", [
                             $customer_id, $assigned_to, $title, $description, $priority, $status, $deadline_val, $task_id
                         ]);
+
+                        if (function_exists('sendWhatsAppNotification')) {
+                            $status_label = $status == 'pending' ? 'Pendente' : ($status == 'in_progress' ? 'Em andamento' : 'Concluído');
+                            sendWhatsAppNotification($assigned_to, $user_id, $title, "atualizou a tarefa com status '{$status_label}'");
+                        }
+
                         Redirect::to('kanban.php?success=' . urlencode("Tarefa #{$task_id} atualizada com sucesso!"));
                     } else {
                         $error_msg = implode("<br>", $errors);
