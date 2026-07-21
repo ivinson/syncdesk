@@ -127,3 +127,24 @@ INSERT IGNORE INTO `system_settings` (`setting_key`, `setting_value`, `descripti
 ('openai_api_key', '', 'Chave de API da OpenAI para processamento de tarefas em lote'),
 ('gemini_api_key', '', 'Chave de API do Gemini para processamento de tarefas em lote');
 
+-- 6. WhatsApp Numbers Table (Official Sync WhatsApp Numbers)
+CREATE TABLE IF NOT EXISTS `whatsapp_numbers` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `phone_number` VARCHAR(50) NOT NULL,
+  `name` VARCHAR(255) NOT NULL,
+  `connected_to` VARCHAR(255) DEFAULT NULL,
+  `connection_status` ENUM('connected', 'disconnected') NOT NULL DEFAULT 'connected',
+  `notes` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Seed default Sync WhatsApp Numbers
+INSERT INTO `whatsapp_numbers` (`id`, `phone_number`, `name`, `connected_to`, `connection_status`, `notes`) VALUES
+(1, '+55 11 98888-7777', 'Sync Desk - Atendimento Comercial', 'Evolution API - Instância Principal', 'connected', 'Número oficial para captação de novos clientes e vendas.'),
+(2, '+55 11 97777-6666', 'Sync Desk - Suporte Técnico', 'n8n VPS - Workflow Ticket Bot', 'connected', 'Número integrado ao bot de abertura automatizada de chamados.'),
+(3, '+55 11 96666-5555', 'Sync Desk - Notificações Internas', 'Z-API / Server 02', 'disconnected', 'Número em manutenção para envio de notificações de sistema.')
+ON DUPLICATE KEY UPDATE `phone_number`=VALUES(`phone_number`), `name`=VALUES(`name`), `connected_to`=VALUES(`connected_to`), `connection_status`=VALUES(`connection_status`);
+
+
+

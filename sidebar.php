@@ -224,6 +224,14 @@ $sb_current_page = basename($_SERVER['PHP_SELF']);
                 <span>Clientes</span>
             </a>
         </li>
+
+        <!-- 3.5 Meus números (WhatsApp Sync) -->
+        <li class="menu-item">
+            <a href="whatsapp_numbers.php" class="menu-link <?= $sb_current_page == 'whatsapp_numbers.php' ? 'active' : '' ?>">
+                <i class="bi bi-whatsapp"></i>
+                <span>Meus números</span>
+            </a>
+        </li>
         
         <!-- 4. Knowledge Base (Active) -->
         <li class="menu-item">

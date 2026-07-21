@@ -39,6 +39,7 @@ if (!$is_admin) {
 $shortcuts_pool = [
     ['title' => 'Dashboard - Painel Geral', 'url' => 'index.php', 'icon' => 'bi-grid-1x2-fill', 'admin_only' => false],
     ['title' => 'Clientes & Ativos', 'url' => 'manage_assets.php', 'icon' => 'bi-people', 'admin_only' => false],
+    ['title' => 'Meus números - WhatsApp Sync', 'url' => 'whatsapp_numbers.php', 'icon' => 'bi-whatsapp', 'admin_only' => false],
     ['title' => 'Knowledge Base - Base de Conhecimento', 'url' => 'knowledge_base.php', 'icon' => 'bi-journal-text', 'admin_only' => false],
     ['title' => 'Fila de Tarefas', 'url' => 'tasks.php', 'icon' => 'bi-check2-square', 'admin_only' => false],
     ['title' => 'Configurações de Integração', 'url' => 'settings.php', 'icon' => 'bi-gear', 'admin_only' => true],
