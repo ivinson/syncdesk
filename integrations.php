@@ -45,6 +45,7 @@ if (Input::exists()) {
             $wa_tpl_lang = trim(Input::get('whatsapp_meta_template_lang'));
             $wa_open_ticket = trim(Input::get('whatsapp_open_ticket'));
             $wa_queue_id = trim(Input::get('whatsapp_queue_id'));
+            $wa_notify_actor = trim(Input::get('whatsapp_notify_actor'));
 
             $settings_to_update = [
                 'openai_api_key' => $openai_key,
@@ -54,7 +55,8 @@ if (Input::exists()) {
                 'whatsapp_meta_template_name' => $wa_tpl_name,
                 'whatsapp_meta_template_lang' => $wa_tpl_lang,
                 'whatsapp_open_ticket' => $wa_open_ticket,
-                'whatsapp_queue_id' => $wa_queue_id
+                'whatsapp_queue_id' => $wa_queue_id,
+                'whatsapp_notify_actor' => $wa_notify_actor
             ];
 
             $all_ok = true;
@@ -89,6 +91,7 @@ $wa_tpl_name_current = getSystemSetting('whatsapp_meta_template_name', 'vars_001
 $wa_tpl_lang_current = getSystemSetting('whatsapp_meta_template_lang', 'pt_BR');
 $wa_open_ticket_current = getSystemSetting('whatsapp_open_ticket', '0');
 $wa_queue_id_current = getSystemSetting('whatsapp_queue_id', '0');
+$wa_notify_actor_current = getSystemSetting('whatsapp_notify_actor', '0');
 
 ?>
 <!DOCTYPE html>
@@ -294,6 +297,15 @@ $wa_queue_id_current = getSystemSetting('whatsapp_queue_id', '0');
                                 <label for="whatsapp_queue_id" class="form-label fw-semibold text-slate-700">ID da Fila (Queue ID)</label>
                                 <input type="number" name="whatsapp_queue_id" id="whatsapp_queue_id" class="form-control form-control-axis" value="<?= htmlspecialchars($wa_queue_id_current) ?>" placeholder="0">
                                 <div class="form-text" style="font-size:0.75rem;">Defina o ID caso queira direcionar o ticket a uma fila.</div>
+                            </div>
+
+                            <div class="col-12">
+                                <label for="whatsapp_notify_actor" class="form-label fw-semibold text-slate-700">Notificar quem criou ou alterou a tarefa?</label>
+                                <select name="whatsapp_notify_actor" id="whatsapp_notify_actor" class="form-select form-select-axis">
+                                    <option value="0" <?= $wa_notify_actor_current == '0' ? 'selected' : '' ?>>0 - Não notificar quem executou a ação (Apenas para o responsável alocado)</option>
+                                    <option value="1" <?= $wa_notify_actor_current == '1' ? 'selected' : '' ?>>1 - Notificar também o autor da criação/alteração</option>
+                                </select>
+                                <div class="form-text" style="font-size:0.75rem;">Define se a pessoa que criou ou alterou a tarefa também deve receber a notificação no celular dela.</div>
                             </div>
                         </div>
 

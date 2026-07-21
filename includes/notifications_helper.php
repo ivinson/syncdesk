@@ -41,7 +41,8 @@ function initNotificationTables() {
         'whatsapp_meta_template_name' => ['vars_001', 'Nome da template aprovada na Meta'],
         'whatsapp_meta_template_lang' => ['pt_BR', 'Idioma da template aprovada na Meta'],
         'whatsapp_open_ticket' => ['0', 'Opção de abrir ticket (0=Não abre ticket, 1=Abre ticket)'],
-        'whatsapp_queue_id' => ['0', 'ID da fila do ticket (0=Mantém status)']
+        'whatsapp_queue_id' => ['0', 'ID da fila do ticket (0=Mantém status)'],
+        'whatsapp_notify_actor' => ['0', 'Enviar WhatsApp para quem criou/alterou (0=Não enviar para criador, 1=Enviar para criador)']
     ];
 
     foreach ($defaults as $key => $val) {
@@ -72,13 +73,15 @@ function sanitizePhoneNumber($phone) {
 }
 
 // Main function to dispatch WhatsApp notification to a user
-function sendWhatsAppNotification($targetUserId, $actorUserId, $taskTitle, $actionType = 'alterou o status da tarefa') {
-    // 1. Do not notify self
-    if (!empty($actorUserId) && (int)$targetUserId === (int)$actorUserId) {
-        return ['success' => false, 'message' => 'Usuário executou a própria ação. Sem notificação.'];
+function sendWhatsAppNotification($targetUserId, $actorUserId, $taskTitle, $actionType = 'alterou o status da tarefa', $extraDetail = '') {
+    initNotificationTables();
+
+    // 1. Check notify actor setting (0 = don't notify creator/actor, 1 = notify actor as well)
+    $notifyActor = getSystemSetting('whatsapp_notify_actor', '0');
+    if ($notifyActor == '0' && !empty($actorUserId) && (int)$targetUserId === (int)$actorUserId) {
+        return ['success' => false, 'message' => 'Usuário executou a própria ação e a notificação de auto-ação está desativada.'];
     }
 
-    initNotificationTables();
     $db = getNotificationDb();
 
     // 2. Fetch target user notification preferences
@@ -109,11 +112,11 @@ function sendWhatsAppNotification($targetUserId, $actorUserId, $taskTitle, $acti
         }
     }
 
-    return dispatchWhatsAppApiMessage($phone, $actorName, $taskTitle, $actionType);
+    return dispatchWhatsAppApiMessage($phone, $actorName, $taskTitle, $actionType, $extraDetail);
 }
 
 // Low level API dispatcher
-function dispatchWhatsAppApiMessage($phone, $var1Name, $var2TaskTitle, $actionDescription = '') {
+function dispatchWhatsAppApiMessage($phone, $var1Name, $var2TaskTitle, $actionDescription = '', $extraDetail = '') {
     $backendUrl = rtrim(getSystemSetting('whatsapp_backend_url', 'https://sync.triadgroup.com.br'), '/');
     $apiToken = getSystemSetting('whatsapp_api_token', '');
     $apiMode = getSystemSetting('whatsapp_api_mode', 'official');
@@ -158,7 +161,12 @@ function dispatchWhatsAppApiMessage($phone, $var1Name, $var2TaskTitle, $actionDe
     } else {
         // Non-official QR Code API endpoint: /api/messages/send
         $endpoint = $backendUrl . '/api/messages/send';
-        $messageText = "*SyncDesk* 🔔\n\n*{$var1Name}* {$actionDescription}: *{$var2TaskTitle}*.";
+        $messageText = "*SyncDesk* 🔔\n\n*{$var1Name}* {$actionDescription}: *{$var2TaskTitle}*";
+        
+        // Include comment/detail text if present
+        if (!empty($extraDetail)) {
+            $messageText .= "\n\n💬 _\"" . trim($extraDetail) . "\"_";
+        }
         
         $payloadData = [
             'number' => $phone,

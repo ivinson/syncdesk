@@ -332,7 +332,7 @@ if (Input::exists()) {
                 $taskInfoQ = $db->query("SELECT assigned_to, title FROM tasks WHERE id = ? LIMIT 1", [$task_id]);
                 if ($taskInfoQ->count() > 0 && function_exists('sendWhatsAppNotification')) {
                     $tInfo = $taskInfoQ->first();
-                    sendWhatsAppNotification($tInfo->assigned_to, $user_id, $tInfo->title, "adicionou um novo comentário na tarefa");
+                    sendWhatsAppNotification($tInfo->assigned_to, $user_id, $tInfo->title, "adicionou um novo comentário na tarefa", $comment_text);
                 }
                 
                 // Get the newly inserted comment details
