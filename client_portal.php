@@ -143,6 +143,10 @@ if (Input::exists()) {
         $task_id = $db->lastId();
         $protocol_number = "SD-" . str_pad($task_id, 5, '0', STR_PAD_LEFT);
         
+        if (function_exists('sendWhatsAppNotification')) {
+            sendWhatsAppNotification($assigned_to, 0, "[Portal] " . $service_data->name . ": " . $title, "abriu um novo chamado via Portal de Atendimento");
+        }
+        
         // D. Process File Uploads (Max 15MB per file, safe extensions)
         if ($has_files) {
             $upload_dir = 'uploads/';

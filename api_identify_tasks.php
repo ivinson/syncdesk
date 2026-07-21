@@ -426,6 +426,9 @@ else if ($action === 'save') {
         $ok = $db->insert('tasks', $insert_data);
         if ($ok) {
             $inserted_count++;
+            if (function_exists('sendWhatsAppNotification')) {
+                sendWhatsAppNotification($assigned_to, $user_id, $title, "atribuiu a você a nova tarefa");
+            }
         } else {
             $errors[] = "Tarefa #{$task_num} ('{$title}'): Falha ao salvar no banco de dados.";
         }
