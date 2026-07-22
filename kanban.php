@@ -32,6 +32,23 @@ $db->query("CREATE TABLE IF NOT EXISTS `task_comments` (
   CONSTRAINT `fk_tc_task` FOREIGN KEY (`task_id`) REFERENCES `tasks` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_tc_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+// Auto-create task_responsibles table if not exists
+$db->query("CREATE TABLE IF NOT EXISTS `task_responsibles` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `task_id` INT NOT NULL,
+  `user_id` INT NOT NULL,
+  `assigned_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT `fk_tr_task` FOREIGN KEY (`task_id`) REFERENCES `tasks` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_tr_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  UNIQUE KEY `unique_task_user` (`task_id`, `user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+// Migração inicial automática se a tabela estiver vazia
+$check_empty = $db->query("SELECT COUNT(*) AS total FROM task_responsibles")->first()->total;
+if ($check_empty == 0) {
+    $db->query("INSERT IGNORE INTO task_responsibles (task_id, user_id) SELECT id, assigned_to FROM tasks WHERE assigned_to IS NOT NULL AND assigned_to > 0");
+}
 $error_msg = "";
 $success_msg = "";
 
@@ -46,8 +63,7 @@ if (Input::get('success')) {
 if (Input::exists()) {
     if (Token::check(Input::get('csrf'))) {
         $action = Input::get('action');
-        
-        // 1. QUICK STATUS UPDATE FROM TABLE
+               // 1. QUICK STATUS UPDATE FROM TABLE
         if ($action === 'quick_status_update') {
             $task_id = Input::get('task_id');
             $new_status = Input::get('status');
@@ -57,9 +73,11 @@ if (Input::exists()) {
                 if ($task_query->count() > 0) {
                     $task_data = $task_query->first();
                     $can_update = false;
+                    $is_responsible = ($task_data->assigned_to == $user_id) || ($db->query("SELECT id FROM task_responsibles WHERE task_id = ? AND user_id = ?", [$task_id, $user_id])->count() > 0);
+                    
                     if ($is_admin) {
                         $can_update = true;
-                    } else if ($task_data->assigned_to == $user_id) {
+                    } else if ($is_responsible) {
                         $can_update = true;
                     }
                     
@@ -68,7 +86,14 @@ if (Input::exists()) {
                         $status_label = $new_status == 'pending' ? 'Pendente' : ($new_status == 'in_progress' ? 'Em andamento' : 'Concluído');
                         
                         if (function_exists('sendWhatsAppNotification')) {
-                            sendWhatsAppNotification($task_data->assigned_to, $user_id, $task_data->title, "alterou o status para '{$status_label}' na tarefa");
+                            // Notify all responsibles except the one doing the update
+                            $resp_users = $db->query("SELECT user_id FROM task_responsibles WHERE task_id = ?", [$task_id])->results();
+                            foreach ($resp_users as $ru) {
+                                $ru_id = (int)$ru->user_id;
+                                if ($ru_id != $user_id) {
+                                    sendWhatsAppNotification($ru_id, $user_id, $task_data->title, "alterou o status para '{$status_label}' na tarefa");
+                                }
+                            }
                         }
                         
                         if (Input::get('ajax')) {
@@ -122,7 +147,27 @@ if (Input::exists()) {
             $description = trim(Input::get('description'));
             $priority = Input::get('priority');
             $customer_id = (int)Input::get('customer_id');
-            $assigned_to = $is_admin ? (int)Input::get('assigned_to') : $user_id;
+            
+            $assigned_to_input = Input::get('assigned_to');
+            $assigned_to_ids = [];
+            if ($is_admin) {
+                if (is_array($assigned_to_input)) {
+                    foreach ($assigned_to_input as $aid) {
+                        $aid = (int)$aid;
+                        if ($aid > 0) $assigned_to_ids[] = $aid;
+                    }
+                } else {
+                    $aid = (int)$assigned_to_input;
+                    if ($aid > 0) $assigned_to_ids[] = $aid;
+                }
+            } else {
+                $assigned_to_ids[] = $user_id;
+            }
+            if (empty($assigned_to_ids)) {
+                $assigned_to_ids[] = $user_id;
+            }
+            $primary_assigned_to = $assigned_to_ids[0];
+            
             $deadline = Input::get('deadline');
             $deadline_val = !empty($deadline) ? $deadline : null;
             
@@ -137,22 +182,28 @@ if (Input::exists()) {
                 if ($check_ca->count() === 0) {
                     $errors[] = "Acesso negado: Este cliente não está associado à sua conta.";
                 }
-                $assigned_to = $user_id; // Agents can only assign to themselves
             }
             
             if (empty($errors)) {
                 $db->insert('tasks', [
                     'customer_id' => $customer_id,
-                    'assigned_to' => $assigned_to,
+                    'assigned_to' => $primary_assigned_to,
                     'title' => $title,
                     'description' => $description,
                     'priority' => $priority,
                     'status' => 'pending',
                     'deadline' => $deadline_val
                 ]);
+                
+                $new_task_id = $db->query("SELECT LAST_INSERT_ID() AS last_id")->first()->last_id;
+                foreach ($assigned_to_ids as $uid) {
+                    $db->query("INSERT IGNORE INTO task_responsibles (task_id, user_id) VALUES (?, ?)", [$new_task_id, $uid]);
+                }
 
                 if (function_exists('sendWhatsAppNotification')) {
-                    sendWhatsAppNotification($assigned_to, $user_id, $title, "atribuiu a você a nova tarefa");
+                    foreach ($assigned_to_ids as $uid) {
+                        sendWhatsAppNotification($uid, $user_id, $title, "atribuiu a você a nova tarefa");
+                    }
                 }
 
                 Redirect::to('kanban.php?success=' . urlencode("Tarefa '{$title}' criada com sucesso!"));
@@ -169,7 +220,10 @@ if (Input::exists()) {
             $priority = Input::get('priority');
             $status = Input::get('status');
             $customer_id = (int)Input::get('customer_id');
-            $assigned_to = $is_admin ? (int)Input::get('assigned_to') : $user_id;
+            
+            $assigned_to_input = Input::get('assigned_to');
+            $assigned_to_ids = [];
+            
             $deadline = Input::get('deadline');
             $deadline_val = !empty($deadline) ? $deadline : null;
             
@@ -184,11 +238,12 @@ if (Input::exists()) {
             if ($task_query->count() > 0) {
                 $task_data = $task_query->first();
                 $can_edit = false;
+                $is_responsible = ($task_data->assigned_to == $user_id) || ($db->query("SELECT id FROM task_responsibles WHERE task_id = ? AND user_id = ?", [$task_id, $user_id])->count() > 0);
+                
                 if ($is_admin) {
                     $can_edit = true;
-                } else if ($task_data->assigned_to == $user_id) {
+                } else if ($is_responsible) {
                     $can_edit = true;
-                    $assigned_to = $user_id; // Agents cannot re-assign tasks
                 }
                 
                 if ($can_edit) {
@@ -198,16 +253,47 @@ if (Input::exists()) {
                         if ($check_ca->count() === 0) {
                             $errors[] = "Acesso negado: Este cliente não está associado à sua conta.";
                         }
+                        
+                        // Keep current responsibles for non-admins
+                        $existing_res = $db->query("SELECT user_id FROM task_responsibles WHERE task_id = ?", [$task_id])->results();
+                        foreach ($existing_res as $er) {
+                            $assigned_to_ids[] = (int)$er->user_id;
+                        }
+                    } else {
+                        // Admin handles submitted responsibles list
+                        if (is_array($assigned_to_input)) {
+                            foreach ($assigned_to_input as $aid) {
+                                $aid = (int)$aid;
+                                if ($aid > 0) $assigned_to_ids[] = $aid;
+                            }
+                        } else {
+                            $aid = (int)$assigned_to_input;
+                            if ($aid > 0) $assigned_to_ids[] = $aid;
+                        }
                     }
+                    
+                    if (empty($assigned_to_ids)) {
+                        $assigned_to_ids[] = $user_id;
+                    }
+                    $primary_assigned_to = $assigned_to_ids[0];
                     
                     if (empty($errors)) {
                         $db->query("UPDATE tasks SET customer_id = ?, assigned_to = ?, title = ?, description = ?, priority = ?, status = ?, deadline = ? WHERE id = ?", [
-                            $customer_id, $assigned_to, $title, $description, $priority, $status, $deadline_val, $task_id
+                            $customer_id, $primary_assigned_to, $title, $description, $priority, $status, $deadline_val, $task_id
                         ]);
+
+                        if ($is_admin) {
+                            $db->query("DELETE FROM task_responsibles WHERE task_id = ?", [$task_id]);
+                            foreach ($assigned_to_ids as $uid) {
+                                $db->query("INSERT IGNORE INTO task_responsibles (task_id, user_id) VALUES (?, ?)", [$task_id, $uid]);
+                            }
+                        }
 
                         if (function_exists('sendWhatsAppNotification')) {
                             $status_label = $status == 'pending' ? 'Pendente' : ($status == 'in_progress' ? 'Em andamento' : 'Concluído');
-                            sendWhatsAppNotification($assigned_to, $user_id, $title, "atualizou a tarefa com status '{$status_label}'");
+                            foreach ($assigned_to_ids as $uid) {
+                                sendWhatsAppNotification($uid, $user_id, $title, "atualizou a tarefa com status '{$status_label}'");
+                            }
                         }
 
                         Redirect::to('kanban.php?success=' . urlencode("Tarefa #{$task_id} atualizada com sucesso!"));
@@ -230,9 +316,11 @@ if (Input::exists()) {
             if ($task_query->count() > 0) {
                 $task_data = $task_query->first();
                 $can_delete = false;
+                $is_responsible = ($task_data->assigned_to == $user_id) || ($db->query("SELECT id FROM task_responsibles WHERE task_id = ? AND user_id = ?", [$task_id, $user_id])->count() > 0);
+                
                 if ($is_admin) {
                     $can_delete = true;
-                } else if ($task_data->assigned_to == $user_id) {
+                } else if ($is_responsible) {
                     $can_delete = true;
                 }
                 
@@ -244,6 +332,8 @@ if (Input::exists()) {
                 }
             } else {
                 $error_msg = "Erro: Tarefa não encontrada.";
+            }
+        }�o encontrada.";
             }
         }
     } else {

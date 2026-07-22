@@ -55,6 +55,18 @@ CREATE TABLE IF NOT EXISTS `tasks` (
   CONSTRAINT `fk_tasks_user` FOREIGN KEY (`assigned_to`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 4b. Task Responsibles Pivot Table (Many-to-Many relationship for multiple agents per task)
+CREATE TABLE IF NOT EXISTS `task_responsibles` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `task_id` INT NOT NULL,
+  `user_id` INT NOT NULL,
+  `assigned_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT `fk_tr_task` FOREIGN KEY (`task_id`) REFERENCES `tasks` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_tr_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  UNIQUE KEY `unique_task_user` (`task_id`, `user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
 -- ==========================================
 -- SEED DATA FOR DEMONSTRATION
 -- ==========================================

@@ -33,6 +33,23 @@ $db->query("CREATE TABLE IF NOT EXISTS `task_comments` (
   CONSTRAINT `fk_tc_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
+// Auto-create task_responsibles table if not exists
+$db->query("CREATE TABLE IF NOT EXISTS `task_responsibles` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `task_id` INT NOT NULL,
+  `user_id` INT NOT NULL,
+  `assigned_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT `fk_tr_task` FOREIGN KEY (`task_id`) REFERENCES `tasks` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_tr_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  UNIQUE KEY `unique_task_user` (`task_id`, `user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+// Migração inicial automática se a tabela estiver vazia
+$check_empty = $db->query("SELECT COUNT(*) AS total FROM task_responsibles")->first()->total;
+if ($check_empty == 0) {
+    $db->query("INSERT IGNORE INTO task_responsibles (task_id, user_id) SELECT id, assigned_to FROM tasks WHERE assigned_to IS NOT NULL AND assigned_to > 0");
+}
+
 $error_msg = "";
 $success_msg = "";
 
@@ -47,8 +64,7 @@ if (Input::get('success')) {
 if (Input::exists()) {
     if (Token::check(Input::get('csrf'))) {
         $action = Input::get('action');
-        
-        // 1. QUICK STATUS UPDATE FROM TABLE
+               // 1. QUICK STATUS UPDATE FROM TABLE
         if ($action === 'quick_status_update') {
             $task_id = Input::get('task_id');
             $new_status = Input::get('status');
@@ -58,9 +74,11 @@ if (Input::exists()) {
                 if ($task_query->count() > 0) {
                     $task_data = $task_query->first();
                     $can_update = false;
+                    $is_responsible = ($task_data->assigned_to == $user_id) || ($db->query("SELECT id FROM task_responsibles WHERE task_id = ? AND user_id = ?", [$task_id, $user_id])->count() > 0);
+                    
                     if ($is_admin) {
                         $can_update = true;
-                    } else if ($task_data->assigned_to == $user_id) {
+                    } else if ($is_responsible) {
                         $can_update = true;
                     }
                     
@@ -69,7 +87,14 @@ if (Input::exists()) {
                         $status_label = $new_status == 'pending' ? 'Pendente' : ($new_status == 'in_progress' ? 'Em andamento' : 'Concluído');
                         
                         if (function_exists('sendWhatsAppNotification')) {
-                            sendWhatsAppNotification($task_data->assigned_to, $user_id, $task_data->title, "alterou o status para '{$status_label}' na tarefa");
+                            // Notify all responsibles except the one doing the update
+                            $resp_users = $db->query("SELECT user_id FROM task_responsibles WHERE task_id = ?", [$task_id])->results();
+                            foreach ($resp_users as $ru) {
+                                $ru_id = (int)$ru->user_id;
+                                if ($ru_id != $user_id) {
+                                    sendWhatsAppNotification($ru_id, $user_id, $task_data->title, "alterou o status para '{$status_label}' na tarefa");
+                                }
+                            }
                         }
                         
                         if (Input::get('ajax')) {
@@ -123,7 +148,27 @@ if (Input::exists()) {
             $description = trim(Input::get('description'));
             $priority = Input::get('priority');
             $customer_id = (int)Input::get('customer_id');
-            $assigned_to = $is_admin ? (int)Input::get('assigned_to') : $user_id;
+            
+            $assigned_to_input = Input::get('assigned_to');
+            $assigned_to_ids = [];
+            if ($is_admin) {
+                if (is_array($assigned_to_input)) {
+                    foreach ($assigned_to_input as $aid) {
+                        $aid = (int)$aid;
+                        if ($aid > 0) $assigned_to_ids[] = $aid;
+                    }
+                } else {
+                    $aid = (int)$assigned_to_input;
+                    if ($aid > 0) $assigned_to_ids[] = $aid;
+                }
+            } else {
+                $assigned_to_ids[] = $user_id;
+            }
+            if (empty($assigned_to_ids)) {
+                $assigned_to_ids[] = $user_id;
+            }
+            $primary_assigned_to = $assigned_to_ids[0];
+            
             $deadline = Input::get('deadline');
             $deadline_val = !empty($deadline) ? $deadline : null;
             
@@ -138,22 +183,28 @@ if (Input::exists()) {
                 if ($check_ca->count() === 0) {
                     $errors[] = "Acesso negado: Este cliente não está associado à sua conta.";
                 }
-                $assigned_to = $user_id; // Agents can only assign to themselves
             }
             
             if (empty($errors)) {
                 $db->insert('tasks', [
                     'customer_id' => $customer_id,
-                    'assigned_to' => $assigned_to,
+                    'assigned_to' => $primary_assigned_to,
                     'title' => $title,
                     'description' => $description,
                     'priority' => $priority,
                     'status' => 'pending',
                     'deadline' => $deadline_val
                 ]);
+                
+                $new_task_id = $db->query("SELECT LAST_INSERT_ID() AS last_id")->first()->last_id;
+                foreach ($assigned_to_ids as $uid) {
+                    $db->query("INSERT IGNORE INTO task_responsibles (task_id, user_id) VALUES (?, ?)", [$new_task_id, $uid]);
+                }
 
                 if (function_exists('sendWhatsAppNotification')) {
-                    sendWhatsAppNotification($assigned_to, $user_id, $title, "atribuiu a você a nova tarefa");
+                    foreach ($assigned_to_ids as $uid) {
+                        sendWhatsAppNotification($uid, $user_id, $title, "atribuiu a você a nova tarefa");
+                    }
                 }
 
                 Redirect::to('tasks.php?success=' . urlencode("Tarefa '{$title}' criada com sucesso!"));
@@ -170,7 +221,10 @@ if (Input::exists()) {
             $priority = Input::get('priority');
             $status = Input::get('status');
             $customer_id = (int)Input::get('customer_id');
-            $assigned_to = $is_admin ? (int)Input::get('assigned_to') : $user_id;
+            
+            $assigned_to_input = Input::get('assigned_to');
+            $assigned_to_ids = [];
+            
             $deadline = Input::get('deadline');
             $deadline_val = !empty($deadline) ? $deadline : null;
             
@@ -185,11 +239,12 @@ if (Input::exists()) {
             if ($task_query->count() > 0) {
                 $task_data = $task_query->first();
                 $can_edit = false;
+                $is_responsible = ($task_data->assigned_to == $user_id) || ($db->query("SELECT id FROM task_responsibles WHERE task_id = ? AND user_id = ?", [$task_id, $user_id])->count() > 0);
+                
                 if ($is_admin) {
                     $can_edit = true;
-                } else if ($task_data->assigned_to == $user_id) {
+                } else if ($is_responsible) {
                     $can_edit = true;
-                    $assigned_to = $user_id; // Agents cannot re-assign tasks
                 }
                 
                 if ($can_edit) {
@@ -199,16 +254,47 @@ if (Input::exists()) {
                         if ($check_ca->count() === 0) {
                             $errors[] = "Acesso negado: Este cliente não está associado à sua conta.";
                         }
+                        
+                        // Keep current responsibles for non-admins
+                        $existing_res = $db->query("SELECT user_id FROM task_responsibles WHERE task_id = ?", [$task_id])->results();
+                        foreach ($existing_res as $er) {
+                            $assigned_to_ids[] = (int)$er->user_id;
+                        }
+                    } else {
+                        // Admin handles submitted responsibles list
+                        if (is_array($assigned_to_input)) {
+                            foreach ($assigned_to_input as $aid) {
+                                $aid = (int)$aid;
+                                if ($aid > 0) $assigned_to_ids[] = $aid;
+                            }
+                        } else {
+                            $aid = (int)$assigned_to_input;
+                            if ($aid > 0) $assigned_to_ids[] = $aid;
+                        }
                     }
+                    
+                    if (empty($assigned_to_ids)) {
+                        $assigned_to_ids[] = $user_id;
+                    }
+                    $primary_assigned_to = $assigned_to_ids[0];
                     
                     if (empty($errors)) {
                         $db->query("UPDATE tasks SET customer_id = ?, assigned_to = ?, title = ?, description = ?, priority = ?, status = ?, deadline = ? WHERE id = ?", [
-                            $customer_id, $assigned_to, $title, $description, $priority, $status, $deadline_val, $task_id
+                            $customer_id, $primary_assigned_to, $title, $description, $priority, $status, $deadline_val, $task_id
                         ]);
+
+                        if ($is_admin) {
+                            $db->query("DELETE FROM task_responsibles WHERE task_id = ?", [$task_id]);
+                            foreach ($assigned_to_ids as $uid) {
+                                $db->query("INSERT IGNORE INTO task_responsibles (task_id, user_id) VALUES (?, ?)", [$task_id, $uid]);
+                            }
+                        }
 
                         if (function_exists('sendWhatsAppNotification')) {
                             $status_label = $status == 'pending' ? 'Pendente' : ($status == 'in_progress' ? 'Em andamento' : 'Concluído');
-                            sendWhatsAppNotification($assigned_to, $user_id, $title, "atualizou a tarefa com status '{$status_label}'");
+                            foreach ($assigned_to_ids as $uid) {
+                                sendWhatsAppNotification($uid, $user_id, $title, "atualizou a tarefa com status '{$status_label}'");
+                            }
                         }
 
                         Redirect::to('tasks.php?success=' . urlencode("Tarefa #{$task_id} atualizada com sucesso!"));
@@ -231,9 +317,11 @@ if (Input::exists()) {
             if ($task_query->count() > 0) {
                 $task_data = $task_query->first();
                 $can_delete = false;
+                $is_responsible = ($task_data->assigned_to == $user_id) || ($db->query("SELECT id FROM task_responsibles WHERE task_id = ? AND user_id = ?", [$task_id, $user_id])->count() > 0);
+                
                 if ($is_admin) {
                     $can_delete = true;
-                } else if ($task_data->assigned_to == $user_id) {
+                } else if ($is_responsible) {
                     $can_delete = true;
                 }
                 
@@ -257,7 +345,7 @@ if (Input::exists()) {
             if ($is_admin) {
                 $can_access = true;
             } else {
-                $access_query = $db->query("SELECT id FROM tasks WHERE id = ? AND (assigned_to = ? OR customer_id IN (SELECT customer_id FROM customer_agent WHERE user_id = ?))", [$task_id, $user_id, $user_id]);
+                $access_query = $db->query("SELECT id FROM tasks WHERE id = ? AND (assigned_to = ? OR id IN (SELECT task_id FROM task_responsibles WHERE user_id = ?) OR customer_id IN (SELECT customer_id FROM customer_agent WHERE user_id = ?))", [$task_id, $user_id, $user_id, $user_id]);
                 if ($access_query->count() > 0) {
                     $can_access = true;
                 }
@@ -319,7 +407,7 @@ if (Input::exists()) {
             if ($is_admin) {
                 $can_access = true;
             } else {
-                $access_query = $db->query("SELECT id FROM tasks WHERE id = ? AND (assigned_to = ? OR customer_id IN (SELECT customer_id FROM customer_agent WHERE user_id = ?))", [$task_id, $user_id, $user_id]);
+                $access_query = $db->query("SELECT id FROM tasks WHERE id = ? AND (assigned_to = ? OR id IN (SELECT task_id FROM task_responsibles WHERE user_id = ?) OR customer_id IN (SELECT customer_id FROM customer_agent WHERE user_id = ?))", [$task_id, $user_id, $user_id, $user_id]);
                 if ($access_query->count() > 0) {
                     $can_access = true;
                 }
@@ -329,10 +417,17 @@ if (Input::exists()) {
             if ($can_access) {
                 $db->query("INSERT INTO task_comments (task_id, user_id, comment) VALUES (?, ?, ?)", [$task_id, $user_id, $comment_text]);
                 
-                $taskInfoQ = $db->query("SELECT assigned_to, title FROM tasks WHERE id = ? LIMIT 1", [$task_id]);
+                $taskInfoQ = $db->query("SELECT title FROM tasks WHERE id = ? LIMIT 1", [$task_id]);
                 if ($taskInfoQ->count() > 0 && function_exists('sendWhatsAppNotification')) {
                     $tInfo = $taskInfoQ->first();
-                    sendWhatsAppNotification($tInfo->assigned_to, $user_id, $tInfo->title, "adicionou um novo comentário na tarefa", $comment_text);
+                    // Notify all responsibles except the commenter
+                    $resp_users = $db->query("SELECT user_id FROM task_responsibles WHERE task_id = ?", [$task_id])->results();
+                    foreach ($resp_users as $ru) {
+                        $ru_id = (int)$ru->user_id;
+                        if ($ru_id != $user_id) {
+                            sendWhatsAppNotification($ru_id, $user_id, $tInfo->title, "adicionou um novo comentário na tarefa", $comment_text);
+                        }
+                    }
                 }
                 
                 // Get the newly inserted comment details
@@ -401,7 +496,8 @@ $params = [];
 
 if (!$is_admin) {
     if ($my_tasks_only) {
-        $where_clauses[] = "t.assigned_to = ?";
+        $where_clauses[] = "(t.assigned_to = ? OR t.id IN (SELECT task_id FROM task_responsibles WHERE user_id = ?))";
+        $params[] = $user_id;
         $params[] = $user_id;
     } else {
         $where_clauses[] = "t.customer_id IN (SELECT customer_id FROM customer_agent WHERE user_id = ?)";
@@ -409,7 +505,8 @@ if (!$is_admin) {
     }
 } else {
     if ($my_tasks_only) {
-        $where_clauses[] = "t.assigned_to = ?";
+        $where_clauses[] = "(t.assigned_to = ? OR t.id IN (SELECT task_id FROM task_responsibles WHERE user_id = ?))";
+        $params[] = $user_id;
         $params[] = $user_id;
     }
 }
@@ -436,10 +533,10 @@ if (count($where_clauses) > 0) {
 // 1. Task Counters (Kept global/total for user workload awareness)
 if ($is_admin) {
     if ($my_tasks_only) {
-        $cnt_all = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE assigned_to = ?", [$user_id])->first()->total;
-        $cnt_pending = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'pending' AND assigned_to = ?", [$user_id])->first()->total;
-        $cnt_in_progress = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'in_progress' AND assigned_to = ?", [$user_id])->first()->total;
-        $cnt_completed = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'completed' AND assigned_to = ?", [$user_id])->first()->total;
+        $cnt_all = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE (assigned_to = ? OR id IN (SELECT task_id FROM task_responsibles WHERE user_id = ?))", [$user_id, $user_id])->first()->total;
+        $cnt_pending = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'pending' AND (assigned_to = ? OR id IN (SELECT task_id FROM task_responsibles WHERE user_id = ?))", [$user_id, $user_id])->first()->total;
+        $cnt_in_progress = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'in_progress' AND (assigned_to = ? OR id IN (SELECT task_id FROM task_responsibles WHERE user_id = ?))", [$user_id, $user_id])->first()->total;
+        $cnt_completed = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'completed' AND (assigned_to = ? OR id IN (SELECT task_id FROM task_responsibles WHERE user_id = ?))", [$user_id, $user_id])->first()->total;
     } else {
         $cnt_all = $db->query("SELECT COUNT(*) AS total FROM tasks")->first()->total;
         $cnt_pending = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'pending'")->first()->total;
@@ -449,10 +546,10 @@ if ($is_admin) {
     $cnt_customers = $db->query("SELECT COUNT(*) AS total FROM customers WHERE status = 1")->first()->total;
 } else {
     if ($my_tasks_only) {
-        $cnt_all = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE assigned_to = ?", [$user_id])->first()->total;
-        $cnt_pending = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE assigned_to = ? AND status = 'pending'", [$user_id])->first()->total;
-        $cnt_in_progress = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE assigned_to = ? AND status = 'in_progress'", [$user_id])->first()->total;
-        $cnt_completed = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE assigned_to = ? AND status = 'completed'", [$user_id])->first()->total;
+        $cnt_all = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE (assigned_to = ? OR id IN (SELECT task_id FROM task_responsibles WHERE user_id = ?))", [$user_id, $user_id])->first()->total;
+        $cnt_pending = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE (assigned_to = ? OR id IN (SELECT task_id FROM task_responsibles WHERE user_id = ?)) AND status = 'pending'", [$user_id, $user_id])->first()->total;
+        $cnt_in_progress = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE (assigned_to = ? OR id IN (SELECT task_id FROM task_responsibles WHERE user_id = ?)) AND status = 'in_progress'", [$user_id, $user_id])->first()->total;
+        $cnt_completed = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE (assigned_to = ? OR id IN (SELECT task_id FROM task_responsibles WHERE user_id = ?)) AND status = 'completed'", [$user_id, $user_id])->first()->total;
     } else {
         $cnt_all = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE customer_id IN (SELECT customer_id FROM customer_agent WHERE user_id = ?)", [$user_id])->first()->total;
         $cnt_pending = $db->query("SELECT COUNT(*) AS total FROM tasks WHERE status = 'pending' AND customer_id IN (SELECT customer_id FROM customer_agent WHERE user_id = ?)", [$user_id])->first()->total;
@@ -464,11 +561,15 @@ if ($is_admin) {
 
 // 2. Fetch Filtered Tasks
 $tasks_sql = "
-    SELECT t.*, c.name AS customer_name, c.company_name AS customer_company, u.fname, u.lname, u.username AS agent_username
+    SELECT t.*, c.name AS customer_name, c.company_name AS customer_company,
+           GROUP_CONCAT(u.id SEPARATOR ',') AS agents_ids,
+           GROUP_CONCAT(COALESCE(NULLIF(TRIM(CONCAT(u.fname, ' ', u.lname)), ''), u.username) SEPARATOR ', ') AS agents_names
     FROM tasks t
     JOIN customers c ON t.customer_id = c.id
-    JOIN users u ON t.assigned_to = u.id
+    LEFT JOIN task_responsibles tr ON t.id = tr.task_id
+    LEFT JOIN users u ON tr.user_id = u.id
     $where_sql
+    GROUP BY t.id
     ORDER BY 
       CASE t.status
         WHEN 'in_progress' THEN 1
@@ -862,6 +963,22 @@ foreach ($tasks as $task) {
             align-items: center;
             justify-content: center;
             font-weight: 600;
+        }
+
+        .avatar-group {
+            display: flex;
+            align-items: center;
+        }
+        .avatar-group .agent-avatar-small {
+            margin-right: -8px;
+            border: 2px solid #ffffff;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            position: relative;
+        }
+        .avatar-group .agent-avatar-small:hover {
+            z-index: 10 !important;
+            transform: scale(1.15);
         }
 
         /* priority badges */
@@ -1309,8 +1426,40 @@ foreach ($tasks as $task) {
                                 </tr>
                             <?php else: ?>
                                 <?php foreach ($tasks as $task): 
-                                    $agent_name = trim($task->fname . ' ' . $task->lname) ?: $task->agent_username;
-                                    $agent_initials = strtoupper(substr($agent_name, 0, 1));
+                                    $agents_ids_arr = !empty($task->agents_ids) ? explode(',', $task->agents_ids) : [];
+                                    $agents_names_arr = !empty($task->agents_names) ? explode(', ', $task->agents_names) : [];
+                                    
+                                    $task_agents = [];
+                                    for ($i = 0; $i < count($agents_ids_arr); $i++) {
+                                        $t_agent_id = (int)$agents_ids_arr[$i];
+                                        $t_agent_name = isset($agents_names_arr[$i]) ? trim($agents_names_arr[$i]) : '';
+                                        if ($t_agent_id > 0) {
+                                            $task_agents[] = [
+                                                'id' => $t_agent_id,
+                                                'name' => $t_agent_name,
+                                                'initials' => strtoupper(substr($t_agent_name, 0, 1))
+                                            ];
+                                        }
+                                    }
+                                    
+                                    // Fallback to assigned_to if pivot is empty
+                                    if (empty($task_agents) && $task->assigned_to > 0) {
+                                        $found_name = 'Atendente';
+                                        foreach ($available_agents as $aa) {
+                                            if ($aa->id == $task->assigned_to) {
+                                                $found_name = trim($aa->fname . ' ' . $aa->lname) ?: $aa->username;
+                                                break;
+                                            }
+                                        }
+                                        $task_agents[] = [
+                                            'id' => $task->assigned_to,
+                                            'name' => $found_name,
+                                            'initials' => strtoupper(substr($found_name, 0, 1))
+                                        ];
+                                    }
+                                    
+                                    $all_agent_names = implode(', ', array_column($task_agents, 'name'));
+                                    $all_agent_ids = implode(',', array_column($task_agents, 'id'));
                                     
                                     $status_class = 'status-' . $task->status;
                                     $priority_class = 'priority-' . $task->priority;
@@ -1323,7 +1472,8 @@ foreach ($tasks as $task) {
                                         <td><input type="checkbox" class="form-check-input"></td>
                                         <td>
                                             <?php 
-                                            $can_edit_task = $is_admin || ($task->assigned_to == $user_id);
+                                            $is_responsible = in_array($user_id, array_column($task_agents, 'id'));
+                                            $can_edit_task = $is_admin || $is_responsible;
                                             ?>
                                             <a href="#" class="task-title-link task-detail-trigger-link <?= !$can_edit_task ? 'fw-semibold text-dark' : '' ?>" 
                                                data-bs-toggle="modal" 
@@ -1334,7 +1484,7 @@ foreach ($tasks as $task) {
                                                data-task-priority="<?= $task->priority ?>"
                                                data-task-status="<?= $task->status ?>"
                                                data-task-customer-name="<?= htmlspecialchars($task->customer_name) ?>"
-                                               data-task-assigned-name="<?= htmlspecialchars($agent_name) ?>"
+                                               data-task-assigned-name="<?= htmlspecialchars($all_agent_names) ?>"
                                                data-task-deadline="<?= !empty($task->deadline) && $task->deadline != '0000-00-00' ? date('d/m/Y', strtotime($task->deadline)) : 'Sem prazo' ?>"><?= htmlspecialchars($task->title) ?></a>
                                             <div class="task-meta">
                                                 <span class="badge bg-light text-secondary border">#T-<?= $task->id ?></span>
@@ -1361,10 +1511,21 @@ foreach ($tasks as $task) {
                                         </td>
                                         <td>
                                             <div class="agent-badge">
-                                                <div class="agent-avatar-small" title="<?= htmlspecialchars($agent_name) ?>">
-                                                    <?= $agent_initials ?>
+                                                <div class="avatar-group me-1 d-flex">
+                                                    <?php foreach (array_slice($task_agents, 0, 3) as $ta): ?>
+                                                        <div class="agent-avatar-small" title="<?= htmlspecialchars($ta['name']) ?>" style="background-color: #cbd5e1; color: #475569; border: 1.5px solid #fff; margin-right: -8px; z-index: 1;">
+                                                            <?= $ta['initials'] ?>
+                                                        </div>
+                                                    <?php endforeach; ?>
+                                                    <?php if (count($task_agents) > 3): ?>
+                                                        <div class="agent-avatar-small bg-secondary text-white" title="<?= count($task_agents) - 3 ?> mais" style="border: 1.5px solid #fff; margin-right: -8px; z-index: 1;">
+                                                            +<?= count($task_agents) - 3 ?>
+                                                        </div>
+                                                    <?php endif; ?>
                                                 </div>
-                                                <span><?= htmlspecialchars($agent_name) ?></span>
+                                                <span class="text-truncate d-inline-block ms-2" style="max-width: 130px; font-size: 0.85rem;" title="<?= htmlspecialchars($all_agent_names) ?>">
+                                                    <?= htmlspecialchars($all_agent_names) ?>
+                                                </span>
                                             </div>
                                         </td>
                                         <td>
@@ -1400,7 +1561,7 @@ foreach ($tasks as $task) {
                                                                data-task-priority="<?= $task->priority ?>"
                                                                data-task-status="<?= $task->status ?>"
                                                                data-task-customer-id="<?= $task->customer_id ?>"
-                                                               data-task-assigned-to="<?= $task->assigned_to ?>"
+                                                               data-task-assigned-ids="<?= $all_agent_ids ?>"
                                                                data-task-deadline="<?= $task->deadline ?>">
                                                                 <i class="bi bi-pencil me-2"></i>Editar Tarefa
                                                             </a>
@@ -1483,14 +1644,19 @@ foreach ($tasks as $task) {
                     
                     <?php if ($is_admin): ?>
                         <div class="mb-3">
-                            <label for="create_assigned_to" class="form-label fw-semibold" style="font-size:0.9rem;">Responsável (Atendente)</label>
-                            <select class="form-select rounded-3" id="create_assigned_to" name="assigned_to" required>
+                            <label class="form-label fw-semibold" style="font-size:0.9rem;">Responsáveis (Atendentes)</label>
+                            <div class="border rounded-3 p-3 bg-light" style="max-height: 150px; overflow-y: auto; border-color: #cbd5e1;">
                                 <?php foreach ($available_agents as $agent): 
                                     $a_name = trim($agent->fname . ' ' . $agent->lname) ?: $agent->username;
                                 ?>
-                                    <option value="<?= $agent->id ?>" <?= $agent->id == $user_id ? 'selected' : '' ?>><?= htmlspecialchars($a_name) ?></option>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" name="assigned_to[]" value="<?= $agent->id ?>" id="create_agent_<?= $agent->id ?>" <?= $agent->id == $user_id ? 'checked' : '' ?>>
+                                        <label class="form-check-label small" for="create_agent_<?= $agent->id ?>">
+                                            <?= htmlspecialchars($a_name) ?>
+                                        </label>
+                                    </div>
                                 <?php endforeach; ?>
-                            </select>
+                            </div>
                         </div>
                     <?php endif; ?>
                     
@@ -1561,14 +1727,19 @@ foreach ($tasks as $task) {
                     
                     <?php if ($is_admin): ?>
                         <div class="mb-3">
-                            <label for="edit_assigned_to" class="form-label fw-semibold" style="font-size:0.9rem;">Responsável (Atendente)</label>
-                            <select class="form-select rounded-3" id="edit_assigned_to" name="assigned_to" required>
+                            <label class="form-label fw-semibold" style="font-size:0.9rem;">Responsáveis (Atendentes)</label>
+                            <div class="border rounded-3 p-3 bg-light" style="max-height: 150px; overflow-y: auto; border-color: #cbd5e1;">
                                 <?php foreach ($available_agents as $agent): 
                                     $a_name = trim($agent->fname . ' ' . $agent->lname) ?: $agent->username;
                                 ?>
-                                    <option value="<?= $agent->id ?>"><?= htmlspecialchars($a_name) ?></option>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input edit-agent-checkbox" type="checkbox" name="assigned_to[]" value="<?= $agent->id ?>" id="edit_agent_<?= $agent->id ?>">
+                                        <label class="form-check-label small" for="edit_agent_<?= $agent->id ?>">
+                                            <?= htmlspecialchars($a_name) ?>
+                                        </label>
+                                    </div>
                                 <?php endforeach; ?>
-                            </select>
+                            </div>
                         </div>
                     <?php endif; ?>
                     
@@ -1933,8 +2104,9 @@ foreach ($tasks as $task) {
             const priority = button.getAttribute('data-task-priority');
             const status = button.getAttribute('data-task-status');
             const customerId = button.getAttribute('data-task-customer-id');
-            const assignedTo = button.getAttribute('data-task-assigned-to');
             const deadline = button.getAttribute('data-task-deadline');
+            const assignedIdsStr = button.getAttribute('data-task-assigned-ids') || '';
+            const assignedIds = assignedIdsStr.split(',').map(id => id.trim());
             
             // Set input values
             document.getElementById('edit_task_id').value = id;
@@ -1945,11 +2117,16 @@ foreach ($tasks as $task) {
             document.getElementById('edit_customer_id').value = customerId;
             document.getElementById('edit_deadline').value = deadline || '';
             
-            // Check if element exists (only rendered for Admins)
-            const agentSelect = document.getElementById('edit_assigned_to');
-            if (agentSelect) {
-                agentSelect.value = assignedTo;
-            }
+            // Populate checkboxes
+            document.querySelectorAll('.edit-agent-checkbox').forEach(cb => {
+                cb.checked = false;
+            });
+            assignedIds.forEach(aid => {
+                const cb = document.getElementById(`edit_agent_${aid}`);
+                if (cb) {
+                    cb.checked = true;
+                }
+            });
         });
         
         // 2. POPULATE DELETE TASK CONFIRMATION MODAL

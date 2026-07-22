@@ -614,6 +614,8 @@ else if ($action === 'save') {
         $ok = $db->insert('tasks', $insert_data);
         if ($ok) {
             $inserted_count++;
+            $task_id = $db->query("SELECT LAST_INSERT_ID() AS last_id")->first()->last_id;
+            $db->query("INSERT IGNORE INTO task_responsibles (task_id, user_id) VALUES (?, ?)", [$task_id, $assigned_to]);
             if (function_exists('sendWhatsAppNotification')) {
                 sendWhatsAppNotification($assigned_to, $user_id, $title, "atribuiu a você a nova tarefa");
             }
