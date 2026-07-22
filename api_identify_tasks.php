@@ -357,6 +357,194 @@ if ($action === 'analyze') {
     exit;
 }
 
+else if ($action === 'transcribe') {
+    $audio = isset($data['audio']) ? trim($data['audio']) : '';
+    $audio_mime = isset($data['audio_mime']) ? trim($data['audio_mime']) : '';
+
+    if (empty($audio)) {
+        echo json_encode(['success' => false, 'message' => 'O áudio para transcrição não pode estar vazio.']);
+        exit;
+    }
+
+    // Retrieve keys from system_settings database table
+    $openaiKey = "";
+    $geminiKey = "";
+
+    // Check if table system_settings exists
+    $table_check = $db->query("SHOW TABLES LIKE 'system_settings'");
+    if ($table_check->count() > 0) {
+        $openai_query = $db->query("SELECT setting_value FROM system_settings WHERE setting_key = 'openai_api_key' LIMIT 1");
+        if ($openai_query->count() > 0) {
+            $openaiKey = trim($openai_query->first()->setting_value);
+        }
+        
+        $gemini_query = $db->query("SELECT setting_value FROM system_settings WHERE setting_key = 'gemini_api_key' LIMIT 1");
+        if ($gemini_query->count() > 0) {
+            $geminiKey = trim($gemini_query->first()->setting_value);
+        }
+    }
+
+    // Fallbacks
+    if (empty($openaiKey)) {
+        $openaiKey = getenv('OPENAI_API_KEY');
+        if (empty($openaiKey) && defined('OPENAI_API_KEY')) {
+            $openaiKey = OPENAI_API_KEY;
+        }
+    }
+
+    if (empty($geminiKey)) {
+        $geminiKey = getenv('GEMINI_API_KEY');
+        if (empty($geminiKey) && defined('GEMINI_API_KEY')) {
+            $geminiKey = GEMINI_API_KEY;
+        }
+    }
+
+    if (empty($openaiKey) && empty($geminiKey)) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Nenhuma chave de API configurada. Por favor, acesse a página de Integrações e cadastre suas chaves da OpenAI ou do Gemini.'
+        ]);
+        exit;
+    }
+
+    $text = "";
+
+    if (!empty($openaiKey)) {
+        // ==========================================
+        // OPENAI INTEGRATION (WHISPER)
+        // ==========================================
+        $ext = 'webm';
+        if (!empty($audio_mime)) {
+            $mime_parts = explode('/', $audio_mime);
+            if (count($mime_parts) === 2) {
+                $ext = $mime_parts[1];
+                $ext = explode(';', $ext)[0];
+            }
+        }
+
+        $audio_data = base64_decode($audio);
+        if ($audio_data === false) {
+            echo json_encode(['success' => false, 'message' => 'Falha ao decodificar dados de áudio em Base64 para OpenAI.']);
+            exit;
+        }
+
+        $temp_dir = __DIR__ . '/uploads/temp';
+        if (!is_dir($temp_dir)) {
+            mkdir($temp_dir, 0777, true);
+        }
+        $temp_filename = $temp_dir . '/transcription_' . uniqid() . '.' . $ext;
+        file_put_contents($temp_filename, $audio_data);
+
+        // Call Whisper API
+        $whisper_url = "https://api.openai.com/v1/audio/transcriptions";
+        $cFile = new CURLFile($temp_filename, $audio_mime ?: 'audio/webm', basename($temp_filename));
+        
+        $whisper_payload = [
+            'file' => $cFile,
+            'model' => 'whisper-1'
+        ];
+
+        $ch = curl_init($whisper_url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $whisper_payload);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Authorization: Bearer ' . $openaiKey
+        ]);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        
+        $whisper_response = curl_exec($ch);
+        $whisper_httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $whisper_curlError = curl_error($ch);
+        curl_close($ch);
+
+        // Delete temp file
+        if (file_exists($temp_filename)) {
+            unlink($temp_filename);
+        }
+
+        if ($whisper_curlError) {
+            echo json_encode(['success' => false, 'message' => 'Erro de conexão com o OpenAI Whisper: ' . $whisper_curlError]);
+            exit;
+        }
+
+        if ($whisper_httpCode !== 200) {
+            echo json_encode(['success' => false, 'message' => 'Erro da API OpenAI Whisper (HTTP ' . $whisper_httpCode . '): ' . $whisper_response]);
+            exit;
+        }
+
+        $whisper_data = json_decode($whisper_response, true);
+        $text = isset($whisper_data['text']) ? trim($whisper_data['text']) : '';
+    } else {
+        // ==========================================
+        // GEMINI INTEGRATION (TRANSCRIPTION)
+        // ==========================================
+        $model = "gemini-1.5-flash";
+        $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key=" . urlencode($geminiKey);
+
+        $prompt = "Transcreva o áudio fornecido exatamente como falado, em português. Retorne APENAS o texto transcrito, sem introduções, formatações especiais, explicações ou notas adicionais.";
+
+        $parts = [
+            [
+                'inlineData' => [
+                    'mimeType' => $audio_mime ?: 'audio/webm',
+                    'data' => $audio
+                ]
+            ],
+            ['text' => $prompt]
+        ];
+
+        $payload = [
+            'contents' => [
+                [
+                    'parts' => $parts
+                ]
+            ]
+        ];
+
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+
+        if ($curlError) {
+            echo json_encode(['success' => false, 'message' => 'Erro de conexão com a API do Gemini: ' . $curlError]);
+            exit;
+        }
+
+        if ($httpCode !== 200) {
+            echo json_encode(['success' => false, 'message' => 'Erro da API do Gemini (HTTP ' . $httpCode . '): ' . $response]);
+            exit;
+        }
+
+        $resDecoded = json_decode($response, true);
+        if (isset($resDecoded['candidates'][0]['content']['parts'][0]['text'])) {
+            $text = trim($resDecoded['candidates'][0]['content']['parts'][0]['text']);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'A resposta da API do Gemini veio em formato inesperado.']);
+            exit;
+        }
+    }
+
+    if (empty($text)) {
+        echo json_encode(['success' => false, 'message' => 'O áudio fornecido foi processado, mas nenhuma fala foi identificada.']);
+        exit;
+    }
+
+    echo json_encode([
+        'success' => true,
+        'text' => $text
+    ]);
+    exit;
+}
+
 else if ($action === 'save') {
     $tasks = isset($data['tasks']) ? $data['tasks'] : [];
     if (empty($tasks) || !is_array($tasks)) {

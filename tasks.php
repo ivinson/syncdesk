@@ -2744,6 +2744,20 @@ foreach ($tasks as $task) {
             });
         }
 
+        // Tab switch listeners to toggle bulk analyze button text/icon
+        const textTabBtnEl = document.getElementById('text-tab');
+        const audioTabBtnEl = document.getElementById('audio-tab');
+        if (textTabBtnEl && btnAnalyzeBulk) {
+            textTabBtnEl.addEventListener('shown.bs.tab', function () {
+                btnAnalyzeBulk.innerHTML = '<i class="bi bi-cpu"></i> Analisar com IA';
+            });
+        }
+        if (audioTabBtnEl && btnAnalyzeBulk) {
+            audioTabBtnEl.addEventListener('shown.bs.tab', function () {
+                btnAnalyzeBulk.innerHTML = '<i class="bi bi-translate"></i> Transcrever Áudio';
+            });
+        }
+
         if (btnAnalyzeBulk) {
             btnAnalyzeBulk.addEventListener('click', function() {
                 const inputMode = activeInputTab();
@@ -2752,27 +2766,70 @@ foreach ($tasks as $task) {
                 const defaultCustomer = document.getElementById('bulk_default_customer_id').value;
                 const defaultAgent = document.getElementById('bulk_default_assigned_to').value;
 
+                if (inputMode === 'audio-tab') {
+                    if (!audioBase64) {
+                        showToast('Por favor, grave uma mensagem de voz ou envie um arquivo de áudio para transcrever.', 'warning');
+                        return;
+                    }
+
+                    // Set loading state
+                    btnAnalyzeBulk.disabled = true;
+                    btnAnalyzeBulk.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Transcrevendo...';
+
+                    fetch('api_identify_tasks.php', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            action: 'transcribe',
+                            audio: audioBase64,
+                            audio_mime: audioMimeType
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        btnAnalyzeBulk.disabled = false;
+                        btnAnalyzeBulk.innerHTML = '<i class="bi bi-translate"></i> Transcrever Áudio';
+
+                        if (data.success) {
+                            bulkTextVal.value = data.text;
+                            
+                            // Switch to text tab
+                            const textTabBtn = document.getElementById('text-tab');
+                            if (textTabBtn) {
+                                const tab = bootstrap.Tab.getInstance(textTabBtn) || new bootstrap.Tab(textTabBtn);
+                                tab.show();
+                            }
+                            
+                            showToast('Áudio transcrito com sucesso! Revise o texto e clique em Analisar com IA.', 'success');
+                        } else {
+                            showToast(data.message || 'Erro ao transcrever áudio.', 'danger');
+                        }
+                    })
+                    .catch(error => {
+                        console.error(error);
+                        btnAnalyzeBulk.disabled = false;
+                        btnAnalyzeBulk.innerHTML = '<i class="bi bi-translate"></i> Transcrever Áudio';
+                        showToast('Erro de rede ao conectar com o servidor.', 'danger');
+                    });
+
+                    return;
+                }
+
+                // If in text-tab
+                text = bulkTextVal.value.trim();
+                if (!text) {
+                    showToast('Por favor, digite ou cole um texto para análise.', 'warning');
+                    return;
+                }
+
                 const requestBody = {
                     action: 'analyze',
                     default_customer_id: defaultCustomer,
-                    default_assigned_to: defaultAgent
+                    default_assigned_to: defaultAgent,
+                    text: text
                 };
-
-                if (inputMode === 'text-tab') {
-                    text = bulkTextVal.value.trim();
-                    if (!text) {
-                        showToast('Por favor, digite ou cole um texto para análise.', 'warning');
-                        return;
-                    }
-                    requestBody.text = text;
-                } else {
-                    if (!audioBase64) {
-                        showToast('Por favor, grave uma mensagem de voz ou envie um arquivo de áudio para análise.', 'warning');
-                        return;
-                    }
-                    requestBody.audio = audioBase64;
-                    requestBody.audio_mime = audioMimeType;
-                }
 
                 // Set loading state
                 btnAnalyzeBulk.disabled = true;
