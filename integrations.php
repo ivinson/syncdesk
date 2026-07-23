@@ -8,8 +8,8 @@ if (!isset($user) || !$user->isLoggedIn() || !hasPerm([2], $user->data()->id)) {
 }
 
 $db = DB::getInstance();
-$error_msg = "";
-$success_msg = "";
+$error_msg = Input::get('err') ?: "";
+$success_msg = Input::get('success') ?: "";
 
 // Ensure notification tables and default settings exist
 if (function_exists('initNotificationTables')) {
@@ -26,13 +26,13 @@ if (Input::exists()) {
         if ($action === 'test_whatsapp') {
             $test_phone = trim(Input::get('test_phone'));
             if (empty($test_phone)) {
-                $error_msg = "Informe um número de telefone com DDI e DDD para o teste.";
+                Redirect::to('integrations.php?err=' . urlencode("Informe um número de telefone com DDI e DDD para o teste."));
             } else {
                 $res = dispatchWhatsAppApiMessage($test_phone, "Administrador (Teste)", "Tarefa de Teste SyncDesk", "efetuou um teste de notificação");
                 if ($res['success']) {
-                    $success_msg = "Mensagem de teste enviada com sucesso para {$test_phone}!";
+                    Redirect::to('integrations.php?success=' . urlencode("Mensagem de teste enviada com sucesso para {$test_phone}!"));
                 } else {
-                    $error_msg = "Falha no envio do teste: " . $res['message'];
+                    Redirect::to('integrations.php?err=' . urlencode("Falha no envio do teste: " . $res['message']));
                 }
             }
         } else {
@@ -46,6 +46,7 @@ if (Input::exists()) {
             $wa_open_ticket = trim(Input::get('whatsapp_open_ticket'));
             $wa_queue_id = trim(Input::get('whatsapp_queue_id'));
             $wa_notify_actor = trim(Input::get('whatsapp_notify_actor'));
+            $portal_assignee = trim(Input::get('portal_default_assignee'));
 
             $settings_to_update = [
                 'openai_api_key' => $openai_key,
@@ -56,7 +57,8 @@ if (Input::exists()) {
                 'whatsapp_meta_template_lang' => $wa_tpl_lang,
                 'whatsapp_open_ticket' => $wa_open_ticket,
                 'whatsapp_queue_id' => $wa_queue_id,
-                'whatsapp_notify_actor' => $wa_notify_actor
+                'whatsapp_notify_actor' => $wa_notify_actor,
+                'portal_default_assignee' => $portal_assignee
             ];
 
             $all_ok = true;
@@ -72,13 +74,13 @@ if (Input::exists()) {
             }
 
             if ($all_ok) {
-                $success_msg = "Configurações de integrações salvas com sucesso!";
+                Redirect::to('integrations.php?success=' . urlencode("Configurações de integrações salvas com sucesso!"));
             } else {
-                $error_msg = "Falha ao atualizar algumas configurações no banco de dados.";
+                Redirect::to('integrations.php?err=' . urlencode("Falha ao atualizar algumas configurações no banco de dados."));
             }
         }
     } else {
-        $error_msg = "Erro: Validação CSRF falhou. Recarregue a página.";
+        Redirect::to('integrations.php?err=' . urlencode("Erro: Validação CSRF falhou. Recarregue a página."));
     }
 }
 
@@ -92,7 +94,10 @@ $wa_tpl_lang_current = getSystemSetting('whatsapp_meta_template_lang', 'pt_BR');
 $wa_open_ticket_current = getSystemSetting('whatsapp_open_ticket', '0');
 $wa_queue_id_current = getSystemSetting('whatsapp_queue_id', '0');
 $wa_notify_actor_current = getSystemSetting('whatsapp_notify_actor', '0');
+$portal_default_assignee_current = getSystemSetting('portal_default_assignee', '1');
 
+// Fetch active users to populate assignee select
+$users_list = $db->query("SELECT id, fname, lname, username FROM users WHERE active = 1 ORDER BY fname ASC, username ASC")->results();
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -306,6 +311,20 @@ $wa_notify_actor_current = getSystemSetting('whatsapp_notify_actor', '0');
                                     <option value="1" <?= $wa_notify_actor_current == '1' ? 'selected' : '' ?>>1 - Notificar também o autor da criação/alteração</option>
                                 </select>
                                 <div class="form-text" style="font-size:0.75rem;">Define se a pessoa que criou ou alterou a tarefa também deve receber a notificação no celular dela.</div>
+                            </div>
+
+                            <div class="col-12 mt-3">
+                                <label for="portal_default_assignee" class="form-label fw-semibold text-slate-700">Responsável Padrão pelas Tarefas do Portal</label>
+                                <select name="portal_default_assignee" id="portal_default_assignee" class="form-select form-select-axis" autocomplete="off">
+                                    <?php foreach ($users_list as $usr): 
+                                        $u_name = trim($usr->fname . ' ' . $usr->lname) ?: $usr->username;
+                                    ?>
+                                        <option value="<?= $usr->id ?>" <?= $usr->id == $portal_default_assignee_current ? 'selected' : '' ?>>
+                                            <?= htmlspecialchars($u_name) ?> (<?= htmlspecialchars($usr->username) ?>)
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <div class="form-text" style="font-size:0.75rem;">Define qual atendente receberá as tarefas criadas pelo portal de suporte quando o cliente não tiver um atendente específico associado.</div>
                             </div>
                         </div>
 

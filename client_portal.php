@@ -122,9 +122,9 @@ if (Input::exists()) {
         $sla_hours = (int)$service_data->sla_hours;
         $sla_limit_at = date('Y-m-d H:i:s', strtotime("+{$sla_hours} hours"));
         
-        // B. Route Task to Assigned Agent (from pivot customer_agent) or fallback to Admin
-        $agent_query = $db->query("SELECT user_id FROM customer_agent WHERE customer_id = ? LIMIT 1", [$customer->id]);
-        $assigned_to = ($agent_query->count() > 0) ? (int)$agent_query->first()->user_id : 1; // 1 = Admin Fallback
+        // B. Route Task to the configured default assignee for portal tasks
+        $default_assignee = (int)getSystemSetting('portal_default_assignee', '1');
+        $assigned_to = $default_assignee;
         
         // C. Insert Task
         $db->insert('tasks', [
@@ -145,6 +145,10 @@ if (Input::exists()) {
         
         if (function_exists('sendWhatsAppNotification')) {
             sendWhatsAppNotification($assigned_to, 0, "[Portal] " . $service_data->name . ": " . $title, "abriu um novo chamado via Portal de Atendimento");
+        }
+        
+        if (function_exists('sendContactWhatsAppNotification') && !empty($contact_id)) {
+            sendContactWhatsAppNotification($contact_id, 0, "[Portal] " . $service_data->name . ": " . $title, "abriu a sua tarefa");
         }
         
         // D. Process File Uploads (Max 15MB per file, safe extensions)

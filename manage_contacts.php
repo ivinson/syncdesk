@@ -32,6 +32,7 @@ if (Input::exists()) {
             $cust_id = (int)Input::get('target_customer_id');
             $name = trim(Input::get('name'));
             $email = trim(Input::get('email'));
+            $whatsapp = trim(Input::get('whatsapp'));
             
             if ($cust_id <= 0) {
                 $error_msg = "Selecione uma empresa válida.";
@@ -41,7 +42,8 @@ if (Input::exists()) {
                 $db->insert('customer_contacts', [
                     'customer_id' => $cust_id,
                     'name' => $name,
-                    'email' => !empty($email) ? $email : null
+                    'email' => !empty($email) ? $email : null,
+                    'whatsapp' => !empty($whatsapp) ? $whatsapp : null
                 ]);
                 $success_msg = "Solicitante '{$name}' cadastrado com sucesso!";
                 // Keep the filter on the client we just added the contact to
@@ -55,13 +57,14 @@ if (Input::exists()) {
             $cust_id = (int)Input::get('target_customer_id');
             $name = trim(Input::get('name'));
             $email = trim(Input::get('email'));
+            $whatsapp = trim(Input::get('whatsapp'));
             
             if ($id <= 0) {
                 $error_msg = "ID do solicitante inválido.";
             } elseif (empty($name)) {
                 $error_msg = "O nome do solicitante é obrigatório.";
             } else {
-                $db->query("UPDATE customer_contacts SET name = ?, email = ? WHERE id = ?", [$name, !empty($email) ? $email : null, $id]);
+                $db->query("UPDATE customer_contacts SET name = ?, email = ?, whatsapp = ? WHERE id = ?", [$name, !empty($email) ? $email : null, !empty($whatsapp) ? $whatsapp : null, $id]);
                 $success_msg = "Solicitante atualizado com sucesso!";
                 if ($cust_id > 0) {
                     $filter_customer_id = $cust_id;
@@ -282,6 +285,7 @@ if ($filter_customer_id > 0) {
                             <th style="width: 80px;">ID</th>
                             <th>Nome do Solicitante</th>
                             <th>E-mail</th>
+                            <th>WhatsApp</th>
                             <th style="width: 180px; text-align: right;">Ações</th>
                         </tr>
                     </thead>
@@ -300,6 +304,17 @@ if ($filter_customer_id > 0) {
                                             <span class="text-muted" style="font-size: 0.85rem;"><i>Não cadastrado</i></span>
                                         <?php endif; ?>
                                     </td>
+                                    <td>
+                                        <?php if (!empty($cnt->whatsapp)): 
+                                            $clean_num = preg_replace('/[^0-9]/', '', $cnt->whatsapp);
+                                        ?>
+                                            <a href="https://wa.me/<?= $clean_num ?>" target="_blank" class="text-decoration-none text-success fw-medium">
+                                                <i class="bi bi-whatsapp me-1"></i> <?= htmlspecialchars($cnt->whatsapp) ?>
+                                            </a>
+                                        <?php else: ?>
+                                            <span class="text-muted" style="font-size: 0.85rem;"><i>Não cadastrado</i></span>
+                                        <?php endif; ?>
+                                    </td>
                                     <td style="text-align: right;">
                                         <div class="d-inline-flex gap-2">
                                             <!-- Edit Button -->
@@ -309,6 +324,7 @@ if ($filter_customer_id > 0) {
                                                     data-id="<?= $cnt->id ?>"
                                                     data-name="<?= htmlspecialchars($cnt->name) ?>"
                                                     data-email="<?= htmlspecialchars($cnt->email ?? '') ?>"
+                                                    data-whatsapp="<?= htmlspecialchars($cnt->whatsapp ?? '') ?>"
                                                     data-cust-id="<?= $cnt->customer_id ?>"
                                                     title="Editar Solicitante">
                                                 <i class="bi bi-pencil"></i> Editar
@@ -369,9 +385,13 @@ if ($filter_customer_id > 0) {
                             <label for="name" class="form-label fw-semibold text-muted" style="font-size:0.8rem;">Nome Completo</label>
                             <input type="text" name="name" id="name" class="form-control rounded-3" placeholder="Ex: Lucas Henrique Silva" required>
                         </div>
-                        <div class="mb-2">
+                        <div class="mb-3">
                             <label for="email" class="form-label fw-semibold text-muted" style="font-size:0.8rem;">E-mail (Opcional)</label>
                             <input type="email" name="email" id="email" class="form-control rounded-3" placeholder="Ex: lucas@cliente.com">
+                        </div>
+                        <div class="mb-2">
+                            <label for="whatsapp" class="form-label fw-semibold text-muted" style="font-size:0.8rem;">WhatsApp (Opcional)</label>
+                            <input type="text" name="whatsapp" id="whatsapp" class="form-control rounded-3" placeholder="Ex: +5511999999999">
                         </div>
                     </div>
                     
@@ -404,9 +424,13 @@ if ($filter_customer_id > 0) {
                             <label for="edit_name" class="form-label fw-semibold text-muted" style="font-size:0.8rem;">Nome Completo</label>
                             <input type="text" name="name" id="edit_name" class="form-control rounded-3" required>
                         </div>
-                        <div class="mb-2">
+                        <div class="mb-3">
                             <label for="edit_email" class="form-label fw-semibold text-muted" style="font-size:0.8rem;">E-mail (Opcional)</label>
                             <input type="email" name="email" id="edit_email" class="form-control rounded-3">
+                        </div>
+                        <div class="mb-2">
+                            <label for="edit_whatsapp" class="form-label fw-semibold text-muted" style="font-size:0.8rem;">WhatsApp (Opcional)</label>
+                            <input type="text" name="whatsapp" id="edit_whatsapp" class="form-control rounded-3">
                         </div>
                     </div>
                     
@@ -462,11 +486,13 @@ if ($filter_customer_id > 0) {
                 const id = button.getAttribute('data-id');
                 const name = button.getAttribute('data-name');
                 const email = button.getAttribute('data-email');
+                const whatsapp = button.getAttribute('data-whatsapp');
                 const custId = button.getAttribute('data-cust-id');
                 
                 editModal.querySelector('#edit_contact_id').value = id;
                 editModal.querySelector('#edit_name').value = name;
                 editModal.querySelector('#edit_email').value = email;
+                editModal.querySelector('#edit_whatsapp').value = whatsapp || '';
                 editModal.querySelector('#edit_target_customer_id').value = custId;
             });
         }

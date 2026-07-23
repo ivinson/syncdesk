@@ -22,6 +22,18 @@ $role_title = $is_admin ? 'Administrador' : 'Atendente';
 
 $db = DB::getInstance();
 
+// AJAX: Fetch client contacts
+if (Input::get('action') === 'get_client_contacts') {
+    $cust_id = (int)Input::get('customer_id');
+    header('Content-Type: application/json');
+    $contacts = $db->query("SELECT id, name, email, whatsapp FROM customer_contacts WHERE customer_id = ? ORDER BY name ASC", [$cust_id])->results();
+    echo json_encode([
+        'success' => true,
+        'contacts' => $contacts
+    ]);
+    exit;
+}
+
 // Auto-create task_comments table if not exists
 $db->query("CREATE TABLE IF NOT EXISTS `task_comments` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -95,6 +107,10 @@ if (Input::exists()) {
                                     sendWhatsAppNotification($ru_id, $user_id, $task_data->title, "alterou o status para '{$status_label}' na tarefa");
                                 }
                             }
+                        }
+                        
+                        if (function_exists('sendContactWhatsAppNotification') && !empty($task_data->customer_contact_id)) {
+                            sendContactWhatsAppNotification($task_data->customer_contact_id, $user_id, $task_data->title, "alterou o status para '{$status_label}' na tarefa");
                         }
                         
                         if (Input::get('ajax')) {
@@ -186,6 +202,9 @@ if (Input::exists()) {
             }
             
             if (empty($errors)) {
+                $contact_id = (int)Input::get('customer_contact_id');
+                $contact_id_val = $contact_id > 0 ? $contact_id : null;
+
                 $db->insert('tasks', [
                     'customer_id' => $customer_id,
                     'assigned_to' => $primary_assigned_to,
@@ -193,7 +212,8 @@ if (Input::exists()) {
                     'description' => $description,
                     'priority' => $priority,
                     'status' => 'pending',
-                    'deadline' => $deadline_val
+                    'deadline' => $deadline_val,
+                    'customer_contact_id' => $contact_id_val
                 ]);
                 
                 $new_task_id = $db->query("SELECT LAST_INSERT_ID() AS last_id")->first()->last_id;
@@ -205,6 +225,10 @@ if (Input::exists()) {
                     foreach ($assigned_to_ids as $uid) {
                         sendWhatsAppNotification($uid, $user_id, $title, "atribuiu a você a nova tarefa");
                     }
+                }
+
+                if (function_exists('sendContactWhatsAppNotification') && $contact_id_val) {
+                    sendContactWhatsAppNotification($contact_id_val, $user_id, $title, "abriu a sua tarefa");
                 }
 
                 Redirect::to('tasks.php?success=' . urlencode("Tarefa '{$title}' criada com sucesso!"));
@@ -279,8 +303,11 @@ if (Input::exists()) {
                     $primary_assigned_to = $assigned_to_ids[0];
                     
                     if (empty($errors)) {
-                        $db->query("UPDATE tasks SET customer_id = ?, assigned_to = ?, title = ?, description = ?, priority = ?, status = ?, deadline = ? WHERE id = ?", [
-                            $customer_id, $primary_assigned_to, $title, $description, $priority, $status, $deadline_val, $task_id
+                        $contact_id = (int)Input::get('customer_contact_id');
+                        $contact_id_val = $contact_id > 0 ? $contact_id : null;
+
+                        $db->query("UPDATE tasks SET customer_id = ?, assigned_to = ?, title = ?, description = ?, priority = ?, status = ?, deadline = ?, customer_contact_id = ? WHERE id = ?", [
+                            $customer_id, $primary_assigned_to, $title, $description, $priority, $status, $deadline_val, $contact_id_val, $task_id
                         ]);
 
                         if ($is_admin) {
@@ -295,6 +322,11 @@ if (Input::exists()) {
                             foreach ($assigned_to_ids as $uid) {
                                 sendWhatsAppNotification($uid, $user_id, $title, "atualizou a tarefa com status '{$status_label}'");
                             }
+                        }
+
+                        if (function_exists('sendContactWhatsAppNotification') && $contact_id_val) {
+                            $status_label = $status == 'pending' ? 'Pendente' : ($status == 'in_progress' ? 'Em andamento' : 'Concluído');
+                            sendContactWhatsAppNotification($contact_id_val, $user_id, $title, "atualizou o status para '{$status_label}' na tarefa");
                         }
 
                         Redirect::to('tasks.php?success=' . urlencode("Tarefa #{$task_id} atualizada com sucesso!"));
@@ -1561,6 +1593,7 @@ foreach ($tasks as $task) {
                                                                data-task-priority="<?= $task->priority ?>"
                                                                data-task-status="<?= $task->status ?>"
                                                                data-task-customer-id="<?= $task->customer_id ?>"
+                                                               data-task-customer-contact-id="<?= $task->customer_contact_id ?>"
                                                                data-task-assigned-ids="<?= $all_agent_ids ?>"
                                                                data-task-deadline="<?= $task->deadline ?>">
                                                                 <i class="bi bi-pencil me-2"></i>Editar Tarefa
@@ -1636,6 +1669,12 @@ foreach ($tasks as $task) {
                                 <?php endforeach; ?>
                             </select>
                         </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="create_customer_contact_id" class="form-label fw-semibold" style="font-size:0.9rem;">Solicitante</label>
+                        <select class="form-select rounded-3" id="create_customer_contact_id" name="customer_contact_id">
+                            <option value="">Selecione um cliente primeiro</option>
+                        </select>
                     </div>
                     <div class="mb-3">
                         <label for="create_deadline" class="form-label fw-semibold" style="font-size:0.9rem;">Data Limite (Deadline) <span class="text-muted small fw-normal">(Opcional)</span></label>
@@ -1718,6 +1757,12 @@ foreach ($tasks as $task) {
                             <?php foreach ($available_customers as $cust): ?>
                                 <option value="<?= $cust->id ?>"><?= htmlspecialchars($cust->name) ?></option>
                             <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_customer_contact_id" class="form-label fw-semibold" style="font-size:0.9rem;">Solicitante</label>
+                        <select class="form-select rounded-3" id="edit_customer_contact_id" name="customer_contact_id">
+                            <option value="">Selecione um cliente primeiro</option>
                         </select>
                     </div>
                     <div class="mb-3">
@@ -2092,6 +2137,57 @@ foreach ($tasks as $task) {
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         
+        // Reusable function to load customer contacts dynamically
+        function loadCustomerContacts(customerId, selectElementId, selectedContactId = null) {
+            const select = document.getElementById(selectElementId);
+            if (!select) return;
+            
+            select.innerHTML = '<option value="">Carregando solicitantes...</option>';
+            
+            if (!customerId) {
+                select.innerHTML = '<option value="">Selecione um cliente primeiro</option>';
+                return;
+            }
+            
+            fetch('tasks.php?action=get_client_contacts&customer_id=' + customerId)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        select.innerHTML = '<option value="">Sem solicitante</option>';
+                        data.contacts.forEach(contact => {
+                            const option = document.createElement('option');
+                            option.value = contact.id;
+                            option.textContent = contact.name + (contact.whatsapp ? ' (' + contact.whatsapp + ')' : '');
+                            if (selectedContactId && contact.id == selectedContactId) {
+                                option.selected = true;
+                            }
+                            select.appendChild(option);
+                        });
+                    } else {
+                        select.innerHTML = '<option value="">Erro ao carregar</option>';
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    select.innerHTML = '<option value="">Erro ao carregar</option>';
+                });
+        }
+
+        // Listeners for Customer dropdown changes
+        const createCustSelect = document.getElementById('create_customer_id');
+        if (createCustSelect) {
+            createCustSelect.addEventListener('change', function() {
+                loadCustomerContacts(this.value, 'create_customer_contact_id');
+            });
+        }
+
+        const editCustSelect = document.getElementById('edit_customer_id');
+        if (editCustSelect) {
+            editCustSelect.addEventListener('change', function() {
+                loadCustomerContacts(this.value, 'edit_customer_contact_id');
+            });
+        }
+
         // 1. POPULATE EDIT TASK MODAL
         const editTaskModal = document.getElementById('editTaskModal');
         editTaskModal.addEventListener('show.bs.modal', function(event) {
@@ -2104,6 +2200,7 @@ foreach ($tasks as $task) {
             const priority = button.getAttribute('data-task-priority');
             const status = button.getAttribute('data-task-status');
             const customerId = button.getAttribute('data-task-customer-id');
+            const contactId = button.getAttribute('data-task-customer-contact-id') || '';
             const deadline = button.getAttribute('data-task-deadline');
             const assignedIdsStr = button.getAttribute('data-task-assigned-ids') || '';
             const assignedIds = assignedIdsStr.split(',').map(id => id.trim());
@@ -2116,6 +2213,9 @@ foreach ($tasks as $task) {
             document.getElementById('edit_status').value = status;
             document.getElementById('edit_customer_id').value = customerId;
             document.getElementById('edit_deadline').value = deadline || '';
+            
+            // Load and pre-select contact
+            loadCustomerContacts(customerId, 'edit_customer_contact_id', contactId);
             
             // Populate checkboxes
             document.querySelectorAll('.edit-agent-checkbox').forEach(cb => {

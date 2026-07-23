@@ -42,7 +42,8 @@ function initNotificationTables() {
         'whatsapp_meta_template_lang' => ['pt_BR', 'Idioma da template aprovada na Meta'],
         'whatsapp_open_ticket' => ['0', 'Opção de abrir ticket (0=Não abre ticket, 1=Abre ticket)'],
         'whatsapp_queue_id' => ['0', 'ID da fila do ticket (0=Mantém status)'],
-        'whatsapp_notify_actor' => ['0', 'Enviar WhatsApp para quem criou/alterou (0=Não enviar para criador, 1=Enviar para criador)']
+        'whatsapp_notify_actor' => ['0', 'Enviar WhatsApp para quem criou/alterou (0=Não enviar para criador, 1=Enviar para criador)'],
+        'portal_default_assignee' => ['1', 'ID do usuário padrão para recebimento de tarefas do portal de suporte']
     ];
 
     foreach ($defaults as $key => $val) {
@@ -114,6 +115,45 @@ function sendWhatsAppNotification($targetUserId, $actorUserId, $taskTitle, $acti
 
     return dispatchWhatsAppApiMessage($phone, $actorName, $taskTitle, $actionType, $extraDetail);
 }
+
+// Dispatch WhatsApp notification to a customer contact (solicitante)
+function sendContactWhatsAppNotification($contactId, $actorUserId, $taskTitle, $actionType = 'alterou o status da tarefa', $extraDetail = '') {
+    initNotificationTables();
+    $db = getNotificationDb();
+    
+    // Fetch contact details
+    $contactQ = $db->query("SELECT * FROM customer_contacts WHERE id = ? LIMIT 1", [$contactId]);
+    if ($contactQ->count() === 0) {
+        return ['success' => false, 'message' => 'Solicitante não encontrado.'];
+    }
+    
+    $contact = $contactQ->first();
+    
+    // Check if contact has a phone number
+    $rawPhone = trim($contact->whatsapp ?? '');
+    if (empty($rawPhone)) {
+        return ['success' => false, 'message' => 'WhatsApp do solicitante não informado.'];
+    }
+    
+    $phone = sanitizePhoneNumber($rawPhone);
+    if (empty($phone)) {
+        return ['success' => false, 'message' => 'WhatsApp do solicitante é inválido.'];
+    }
+    
+    // Fetch actor name
+    $actorName = 'Sistema';
+    if (!empty($actorUserId)) {
+        $actorQ = $db->query("SELECT fname, lname, username FROM users WHERE id = ? LIMIT 1", [$actorUserId]);
+        if ($actorQ->count() > 0) {
+            $u = $actorQ->first();
+            $fullName = trim(($u->fname ?? '') . ' ' . ($u->lname ?? ''));
+            $actorName = !empty($fullName) ? $fullName : $u->username;
+        }
+    }
+    
+    return dispatchWhatsAppApiMessage($phone, $actorName, $taskTitle, $actionType, $extraDetail);
+}
+
 
 // Low level API dispatcher
 function dispatchWhatsAppApiMessage($phone, $var1Name, $var2TaskTitle, $actionDescription = '', $extraDetail = '') {

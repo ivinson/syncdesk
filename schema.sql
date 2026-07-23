@@ -12,8 +12,20 @@ CREATE TABLE IF NOT EXISTS `customers` (
   `status` TINYINT NOT NULL DEFAULT 1, -- 1 = Active, 0 = Inactive
   `support_login` VARCHAR(255) DEFAULT NULL,
   `support_password` VARCHAR(255) DEFAULT NULL,
+  `portal_token` VARCHAR(100) DEFAULT NULL UNIQUE,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 1b. Customer Contacts Table (Requesters / Solicitantes)
+CREATE TABLE IF NOT EXISTS `customer_contacts` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `customer_id` INT NOT NULL,
+  `name` VARCHAR(100) NOT NULL,
+  `email` VARCHAR(100) DEFAULT NULL,
+  `whatsapp` VARCHAR(30) DEFAULT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT `fk_cc_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
