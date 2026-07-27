@@ -377,8 +377,6 @@ if (Input::exists()) {
             } else {
                 $error_msg = "Erro: Tarefa não encontrada.";
             }
-        }�o encontrada.";
-            }
         }
     } else {
         $error_msg = "Erro: Validação de token CSRF falhou. Tente novamente.";

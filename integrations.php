@@ -35,8 +35,74 @@ if (Input::exists()) {
                     Redirect::to('integrations.php?err=' . urlencode("Falha no envio do teste: " . $res['message']));
                 }
             }
+        } elseif ($action === 'save_whatsapp') {
+            // Save WhatsApp Gateway settings
+            $wa_mode = trim(Input::get('whatsapp_api_mode'));
+            $wa_backend = trim(Input::get('whatsapp_backend_url'));
+            $wa_token = trim(Input::get('whatsapp_api_token'));
+            $wa_tpl_name = trim(Input::get('whatsapp_meta_template_name'));
+            $wa_tpl_lang = trim(Input::get('whatsapp_meta_template_lang'));
+            $wa_open_ticket = trim(Input::get('whatsapp_open_ticket'));
+            $wa_queue_id = trim(Input::get('whatsapp_queue_id'));
+            $wa_notify_actor = trim(Input::get('whatsapp_notify_actor'));
+            $portal_assignee = trim(Input::get('portal_default_assignee'));
+
+            $settings_to_update = [
+                'whatsapp_api_mode' => $wa_mode,
+                'whatsapp_backend_url' => $wa_backend,
+                'whatsapp_api_token' => $wa_token,
+                'whatsapp_meta_template_name' => $wa_tpl_name,
+                'whatsapp_meta_template_lang' => $wa_tpl_lang,
+                'whatsapp_open_ticket' => $wa_open_ticket,
+                'whatsapp_queue_id' => $wa_queue_id,
+                'whatsapp_notify_actor' => $wa_notify_actor,
+                'portal_default_assignee' => $portal_assignee
+            ];
+
+            $all_ok = true;
+            foreach ($settings_to_update as $key => $val) {
+                $check = $db->query("SELECT id FROM system_settings WHERE setting_key = ?", [$key]);
+                if ($check->count() > 0) {
+                    $upd = $db->query("UPDATE system_settings SET setting_value = ? WHERE setting_key = ?", [$val, $key]);
+                    if (!$upd) $all_ok = false;
+                } else {
+                    $ins = $db->insert('system_settings', ['setting_key' => $key, 'setting_value' => $val]);
+                    if (!$ins) $all_ok = false;
+                }
+            }
+
+            if ($all_ok) {
+                Redirect::to('integrations.php?success=' . urlencode("Configurações do Gateway WhatsApp salvas com sucesso!"));
+            } else {
+                Redirect::to('integrations.php?err=' . urlencode("Falha ao atualizar algumas configurações do WhatsApp no banco de dados."));
+            }
+        } elseif ($action === 'save_ai') {
+            // Save AI API Key settings
+            $openai_key = trim(Input::get('openai_api_key'));
+
+            $settings_to_update = [
+                'openai_api_key' => $openai_key
+            ];
+
+            $all_ok = true;
+            foreach ($settings_to_update as $key => $val) {
+                $check = $db->query("SELECT id FROM system_settings WHERE setting_key = ?", [$key]);
+                if ($check->count() > 0) {
+                    $upd = $db->query("UPDATE system_settings SET setting_value = ? WHERE setting_key = ?", [$val, $key]);
+                    if (!$upd) $all_ok = false;
+                } else {
+                    $ins = $db->insert('system_settings', ['setting_key' => $key, 'setting_value' => $val]);
+                    if (!$ins) $all_ok = false;
+                }
+            }
+
+            if ($all_ok) {
+                Redirect::to('integrations.php?success=' . urlencode("Configurações de Inteligência Artificial salvas com sucesso!"));
+            } else {
+                Redirect::to('integrations.php?err=' . urlencode("Falha ao atualizar as chaves de API no banco de dados."));
+            }
         } else {
-            // Save main settings
+            // Save main settings fallback (save_settings)
             $openai_key = trim(Input::get('openai_api_key'));
             $wa_mode = trim(Input::get('whatsapp_api_mode'));
             $wa_backend = trim(Input::get('whatsapp_backend_url'));
@@ -233,7 +299,7 @@ $users_list = $db->query("SELECT id, fname, lname, username FROM users WHERE act
             <div class="col-lg-10">
                 <form method="POST" action="">
                     <input type="hidden" name="csrf" value="<?= Token::generate() ?>">
-                    <input type="hidden" name="action" value="save_settings">
+                    <input type="hidden" name="action" value="save_whatsapp">
 
                     <!-- 1. API WhatsApp Settings Card -->
                     <div class="integration-card">
@@ -350,7 +416,19 @@ $users_list = $db->query("SELECT id, fname, lname, username FROM users WHERE act
                                 </div>
                             </div>
                         </div>
+
+                        <hr class="my-4 text-slate-200">
+                        <div class="d-flex justify-content-end">
+                            <button type="submit" class="btn btn-primary btn-primary-axis">
+                                <i class="bi bi-save me-1"></i> Salvar Gateway WhatsApp
+                            </button>
+                        </div>
                     </div>
+                </form>
+
+                <form method="POST" action="">
+                    <input type="hidden" name="csrf" value="<?= Token::generate() ?>">
+                    <input type="hidden" name="action" value="save_ai">
 
                     <!-- 2. AI Key Management Card -->
                     <div class="integration-card">
@@ -375,7 +453,7 @@ $users_list = $db->query("SELECT id, fname, lname, username FROM users WHERE act
 
                         <div class="d-flex justify-content-end">
                             <button type="submit" class="btn btn-primary btn-primary-axis">
-                                <i class="bi bi-save me-1"></i> Salvar Todas as Integrações
+                                <i class="bi bi-save me-1"></i> Salvar Chaves de IA
                             </button>
                         </div>
                     </div>
