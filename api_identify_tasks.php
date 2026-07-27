@@ -573,6 +573,8 @@ else if ($action === 'save') {
         $priority = isset($t['priority']) ? trim($t['priority']) : 'medium';
         $customer_id = isset($t['customer_id']) ? (int)$t['customer_id'] : 0;
         $assigned_to = isset($t['assigned_to']) ? (int)$t['assigned_to'] : 0;
+        $customer_contact_id = isset($t['customer_contact_id']) ? (int)$t['customer_contact_id'] : 0;
+        $customer_contact_id_val = $customer_contact_id > 0 ? $customer_contact_id : null;
 
         $task_num = $index + 1;
 
@@ -608,7 +610,8 @@ else if ($action === 'save') {
             'title' => $title,
             'description' => $description,
             'priority' => $priority,
-            'status' => 'pending'
+            'status' => 'pending',
+            'customer_contact_id' => $customer_contact_id_val
         ];
 
         $ok = $db->insert('tasks', $insert_data);
@@ -618,6 +621,9 @@ else if ($action === 'save') {
             $db->query("INSERT IGNORE INTO task_responsibles (task_id, user_id) VALUES (?, ?)", [$task_id, $assigned_to]);
             if (function_exists('sendWhatsAppNotification')) {
                 sendWhatsAppNotification($assigned_to, $user_id, $title, "atribuiu a você a nova tarefa");
+            }
+            if (function_exists('sendContactWhatsAppNotification') && $customer_contact_id_val) {
+                sendContactWhatsAppNotification($customer_contact_id_val, $user_id, $title, "abriu a sua tarefa");
             }
         } else {
             $errors[] = "Tarefa #{$task_num} ('{$title}'): Falha ao salvar no banco de dados.";

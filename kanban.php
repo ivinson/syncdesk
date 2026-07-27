@@ -2730,12 +2730,17 @@ foreach ($tasks as $task) {
                             </div>
                             
                             <div class="row g-2">
-                                <div class="col-md-5">
+                                <div class="col-md-3">
                                     <select class="form-select form-select-sm rounded-3 bulk-task-customer ${!task.customer_id ? 'border-warning' : ''}" style="font-size: 0.8rem;" onchange="this.classList.remove('border-warning')">
                                         ${custOptions}
                                     </select>
                                 </div>
-                                <div class="col-md-4">
+                                <div class="col-md-3">
+                                    <select class="form-select form-select-sm rounded-3 bulk-task-contact" style="font-size: 0.8rem;">
+                                        <option value="">Selecione o cliente primeiro</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
                                     <select class="form-select form-select-sm rounded-3 bulk-task-agent" style="font-size: 0.8rem;">
                                         ${agentOptions}
                                     </select>
@@ -2788,7 +2793,49 @@ foreach ($tasks as $task) {
                 });
                 updatePriorityColors(prioritySelect);
 
+                // Load contacts function for this card
+                const loadBulkCardContacts = (customerId, selectedId = null) => {
+                    const contactSelect = card.querySelector('.bulk-task-contact');
+                    if (!contactSelect) return;
+                    if (!customerId) {
+                        contactSelect.innerHTML = '<option value="">Selecione o cliente primeiro</option>';
+                        return;
+                    }
+                    contactSelect.innerHTML = '<option value="">Carregando...</option>';
+                    fetch('kanban.php?action=get_client_contacts&customer_id=' + customerId)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                contactSelect.innerHTML = '<option value="">Sem solicitante</option>';
+                                data.contacts.forEach(contact => {
+                                    const option = document.createElement('option');
+                                    option.value = contact.id;
+                                    option.textContent = contact.name + (contact.whatsapp ? ' (' + contact.whatsapp + ')' : '');
+                                    if (selectedId && contact.id == selectedId) {
+                                        option.selected = true;
+                                    }
+                                    contactSelect.appendChild(option);
+                                });
+                            } else {
+                                contactSelect.innerHTML = '<option value="">Erro</option>';
+                            }
+                        })
+                        .catch(err => {
+                            console.error(err);
+                            contactSelect.innerHTML = '<option value="">Erro</option>';
+                        });
+                };
+
+                // Bind customer select change event to reload contacts
+                const custSelect = card.querySelector('.bulk-task-customer');
+                custSelect.addEventListener('change', function() {
+                    loadBulkCardContacts(this.value);
+                });
+
                 bulkTasksPreviewList.appendChild(card);
+                if (task.customer_id) {
+                    loadBulkCardContacts(task.customer_id, task.customer_contact_id || null);
+                }
             });
         }
 
@@ -2820,6 +2867,7 @@ foreach ($tasks as $task) {
                         const customerId = card.querySelector('.bulk-task-customer').value;
                         const assignedTo = card.querySelector('.bulk-task-agent').value;
                         const priority = card.querySelector('.bulk-task-priority').value;
+                        const customerContactId = card.querySelector('.bulk-task-contact').value;
 
                         if (!title) {
                             showToast('O título de todas as tarefas selecionadas deve ser preenchido.', 'warning');
@@ -2841,7 +2889,8 @@ foreach ($tasks as $task) {
                             description: description,
                             customer_id: customerId,
                             assigned_to: assignedTo,
-                            priority: priority
+                            priority: priority,
+                            customer_contact_id: customerContactId
                         });
                     }
                 });
