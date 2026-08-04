@@ -22,6 +22,7 @@ if (Input::exists()) {
         if ($action === 'add') {
             $name = trim(Input::get('name'));
             $sla_hours = (int)Input::get('sla_hours');
+            $default_title = trim(Input::get('default_title'));
             
             if (empty($name)) {
                 $error_msg = "O nome do serviço é obrigatório.";
@@ -35,7 +36,8 @@ if (Input::exists()) {
                 } else {
                     $db->insert('services', [
                         'name' => $name,
-                        'sla_hours' => $sla_hours
+                        'sla_hours' => $sla_hours,
+                        'default_title' => empty($default_title) ? null : $default_title
                     ]);
                     $success_msg = "Serviço '{$name}' cadastrado com sucesso!";
                 }
@@ -47,6 +49,7 @@ if (Input::exists()) {
             $id = (int)Input::get('service_id');
             $name = trim(Input::get('name'));
             $sla_hours = (int)Input::get('sla_hours');
+            $default_title = trim(Input::get('default_title'));
             
             if ($id <= 0) {
                 $error_msg = "ID do serviço inválido.";
@@ -60,7 +63,7 @@ if (Input::exists()) {
                 if ($check->count() > 0) {
                     $error_msg = "Já existe outro serviço cadastrado com este nome.";
                 } else {
-                    $db->query("UPDATE services SET name = ?, sla_hours = ? WHERE id = ?", [$name, $sla_hours, $id]);
+                    $db->query("UPDATE services SET name = ?, sla_hours = ?, default_title = ? WHERE id = ?", [$name, $sla_hours, empty($default_title) ? null : $default_title, $id]);
                     $success_msg = "Serviço atualizado com sucesso!";
                 }
             }
@@ -239,7 +242,14 @@ $services = $db->query("SELECT * FROM services ORDER BY name ASC")->results();
                             <?php foreach ($services as $srv): ?>
                                 <tr>
                                     <td><strong>#<?= $srv->id ?></strong></td>
-                                    <td class="fw-semibold text-slate-700"><?= htmlspecialchars($srv->name) ?></td>
+                                    <td class="fw-semibold text-slate-700">
+                                        <?= htmlspecialchars($srv->name) ?>
+                                        <?php if (!empty($srv->default_title)): ?>
+                                            <div class="text-muted fw-normal mt-1" style="font-size: 0.78rem;">
+                                                <i class="bi bi-tag-fill text-secondary me-1" style="font-size:0.75rem;"></i>Título Padrão: "<?= htmlspecialchars($srv->default_title) ?>"
+                                            </div>
+                                        <?php endif; ?>
+                                    </td>
                                     <td>
                                         <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2 py-1">
                                             <i class="bi bi-clock me-1"></i> <?= $srv->sla_hours ?> horas
@@ -253,6 +263,7 @@ $services = $db->query("SELECT * FROM services ORDER BY name ASC")->results();
                                                     data-bs-target="#editServiceModal"
                                                     data-id="<?= $srv->id ?>"
                                                     data-name="<?= htmlspecialchars($srv->name) ?>"
+                                                    data-default-title="<?= htmlspecialchars($srv->default_title ?? '') ?>"
                                                     data-sla="<?= $srv->sla_hours ?>"
                                                     title="Editar Serviço">
                                                 <i class="bi bi-pencil"></i> Editar
@@ -307,6 +318,11 @@ $services = $db->query("SELECT * FROM services ORDER BY name ASC")->results();
                             <label for="name" class="form-label fw-semibold text-muted" style="font-size:0.8rem;">Nome do Serviço</label>
                             <input type="text" name="name" id="name" class="form-control rounded-3" placeholder="Ex: Criação de Fluxo Personalizado" required>
                         </div>
+                        <div class="mb-3">
+                            <label for="default_title" class="form-label fw-semibold text-muted" style="font-size:0.8rem;">Título Padrão da Solicitação (Opcional)</label>
+                            <input type="text" name="default_title" id="default_title" class="form-control rounded-3" placeholder="Ex: Troca de número na BM">
+                            <div class="form-text" style="font-size:0.7rem;">Título que será preenchido automaticamente ao selecionar este serviço no portal.</div>
+                        </div>
                         <div class="mb-2">
                             <label for="sla_hours" class="form-label fw-semibold text-muted" style="font-size:0.8rem;">Prazo de SLA (em Horas)</label>
                             <input type="number" name="sla_hours" id="sla_hours" class="form-control rounded-3" min="1" placeholder="Ex: 72" required>
@@ -341,6 +357,11 @@ $services = $db->query("SELECT * FROM services ORDER BY name ASC")->results();
                         <div class="mb-3">
                             <label for="edit_name" class="form-label fw-semibold text-muted" style="font-size:0.8rem;">Nome do Serviço</label>
                             <input type="text" name="name" id="edit_name" class="form-control rounded-3" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="edit_default_title" class="form-label fw-semibold text-muted" style="font-size:0.8rem;">Título Padrão da Solicitação (Opcional)</label>
+                            <input type="text" name="default_title" id="edit_default_title" class="form-control rounded-3" placeholder="Ex: Troca de número na BM">
+                            <div class="form-text" style="font-size:0.7rem;">Título que será preenchido automaticamente ao selecionar este serviço no portal.</div>
                         </div>
                         <div class="mb-2">
                             <label for="edit_sla_hours" class="form-label fw-semibold text-muted" style="font-size:0.8rem;">Prazo de SLA (em Horas)</label>
@@ -399,10 +420,12 @@ $services = $db->query("SELECT * FROM services ORDER BY name ASC")->results();
                 const button = event.relatedTarget;
                 const id = button.getAttribute('data-id');
                 const name = button.getAttribute('data-name');
+                const defaultTitle = button.getAttribute('data-default-title');
                 const sla = button.getAttribute('data-sla');
                 
                 editModal.querySelector('#edit_service_id').value = id;
                 editModal.querySelector('#edit_name').value = name;
+                editModal.querySelector('#edit_default_title').value = defaultTitle || '';
                 editModal.querySelector('#edit_sla_hours').value = sla;
             });
         }

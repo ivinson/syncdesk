@@ -501,9 +501,9 @@ function render_access_denied($msg) {
                         <div class="col-md-6">
                             <label for="service_id" class="form-label">Serviço Solicitado</label>
                             <select name="service_id" id="service_id" class="form-select" required>
-                                <option value="" data-sla="0">Selecione o serviço desejado...</option>
+                                <option value="" data-sla="0" data-default-title="">Selecione o serviço desejado...</option>
                                 <?php foreach ($services as $srv): ?>
-                                    <option value="<?= $srv->id ?>" data-sla="<?= $srv->sla_hours ?>"><?= htmlspecialchars($srv->name) ?> (SLA: <?= $srv->sla_hours ?>h)</option>
+                                    <option value="<?= $srv->id ?>" data-sla="<?= $srv->sla_hours ?>" data-default-title="<?= htmlspecialchars($srv->default_title ?? '') ?>"><?= htmlspecialchars($srv->name) ?> (SLA: <?= $srv->sla_hours ?>h)</option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
@@ -722,8 +722,37 @@ function render_access_denied($msg) {
         }
     }
 
+    function updateDefaultTitle() {
+        if (!serviceSelectInput) return;
+        
+        const titleInput = document.getElementById('title');
+        if (!titleInput) return;
+        
+        const selectedOption = serviceSelectInput.options[serviceSelectInput.selectedIndex];
+        const defaultTitle = selectedOption ? selectedOption.getAttribute('data-default-title') : '';
+        
+        // Cache list of all default titles in the dropdown options
+        const defaultTitlesList = [];
+        for (let i = 0; i < serviceSelectInput.options.length; i++) {
+            const t = serviceSelectInput.options[i].getAttribute('data-default-title');
+            if (t) defaultTitlesList.push(t.trim().toLowerCase());
+        }
+        
+        const currentVal = titleInput.value.trim().toLowerCase();
+        
+        // Populate if:
+        // 1. The title input is currently empty
+        // 2. The title input current value is one of the default titles of other options (meaning it wasn't modified to a custom text by user)
+        if (currentVal === '' || defaultTitlesList.includes(currentVal)) {
+            titleInput.value = defaultTitle || '';
+        }
+    }
+
     if (serviceSelectInput) {
-        serviceSelectInput.addEventListener('change', updateMinDeliveryDate);
+        serviceSelectInput.addEventListener('change', function() {
+            updateMinDeliveryDate();
+            updateDefaultTitle();
+        });
     }
     
     if (preferredDeliveryInput) {
@@ -733,6 +762,10 @@ function render_access_denied($msg) {
     
     // Initialize on load
     updateMinDeliveryDate();
+    const titleInputOnLoad = document.getElementById('title');
+    if (titleInputOnLoad && titleInputOnLoad.value.trim() === '') {
+        updateDefaultTitle();
+    }
 
     // JS Preview file selections helper
     const attachmentInput = document.getElementById('attachments');
