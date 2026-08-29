@@ -606,6 +606,9 @@ if ($current_customer) {
                             style="font-weight: 500;">
                         <i class="bi bi-pencil"></i> Editar Cliente
                     </button>
+                    <a href="manage_media.php?customer_id=<?= $current_customer->id ?>" class="btn btn-outline-primary btn-sm px-3 rounded-3 d-inline-flex align-items-center gap-2" style="font-weight: 500;">
+                        <i class="bi bi-folder-symlink"></i> Mídias do Cliente
+                    </a>
                     <button class="btn btn-primary btn-sm px-3 rounded-3 d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#createAssetModal" style="font-weight: 500;">
                         <i class="bi bi-plus-lg"></i> Novo Ativo
                     </button>
@@ -771,6 +774,9 @@ if ($current_customer) {
                                 <div class="mt-auto pt-2 border-top d-flex justify-content-between align-items-center">
                                     <a href="manage_assets.php?customer_id=<?= $cust->id ?>" class="text-primary fw-semibold small d-inline-flex align-items-center gap-1 text-decoration-none">
                                         Gerenciar Ativos <i class="bi bi-chevron-right"></i>
+                                    </a>
+                                    <a href="manage_media.php?customer_id=<?= $cust->id ?>" class="text-secondary fw-semibold small d-inline-flex align-items-center gap-1 text-decoration-none hover-primary">
+                                        <i class="bi bi-folder-symlink"></i> Mídias
                                     </a>
                                 </div>
                             </div>

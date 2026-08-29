@@ -225,6 +225,14 @@ $sb_current_page = basename($_SERVER['PHP_SELF']);
             </a>
         </li>
 
+        <!-- 3.1 Mídias (Active) -->
+        <li class="menu-item">
+            <a href="manage_media.php" class="menu-link <?= $sb_current_page == 'manage_media.php' ? 'active' : '' ?>">
+                <i class="bi bi-folder-symlink"></i>
+                <span>Mídias</span>
+            </a>
+        </li>
+
         <!-- 3.5 Meus números (WhatsApp Sync) -->
         <li class="menu-item">
             <a href="whatsapp_numbers.php" class="menu-link <?= $sb_current_page == 'whatsapp_numbers.php' ? 'active' : '' ?>">

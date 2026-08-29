@@ -170,5 +170,23 @@ INSERT INTO `whatsapp_numbers` (`id`, `phone_number`, `name`, `connected_to`, `c
 (3, '+55 11 96666-5555', 'Sync Desk - Notificações Internas', 'Z-API / Server 02', 'disconnected', 'Número em manutenção para envio de notificações de sistema.')
 ON DUPLICATE KEY UPDATE `phone_number`=VALUES(`phone_number`), `name`=VALUES(`name`), `connected_to`=VALUES(`connected_to`), `connection_status`=VALUES(`connection_status`);
 
+-- 7. Customer Media Table (Uploaded Media per Customer)
+CREATE TABLE IF NOT EXISTS `customer_media` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `customer_id` INT NOT NULL,
+  `user_id` INT NOT NULL,
+  `original_name` VARCHAR(255) NOT NULL,
+  `file_name` VARCHAR(255) NOT NULL,
+  `file_path` VARCHAR(255) NOT NULL,
+  `file_size` BIGINT NOT NULL,
+  `mime_type` VARCHAR(100) NOT NULL,
+  `file_type` ENUM('image', 'video', 'document', 'audio', 'other') NOT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT `fk_cm_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_cm_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
 
 
