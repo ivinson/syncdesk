@@ -213,7 +213,7 @@ $tickets = $db->query("
     FROM tasks t 
     LEFT JOIN services s ON t.service_id = s.id 
     LEFT JOIN customer_contacts c ON t.customer_contact_id = c.id 
-    WHERE t.customer_id = ? 
+    WHERE t.customer_id = ? AND t.customer_contact_id IS NOT NULL
     ORDER BY t.id DESC
 ", [$customer->id])->results();
 

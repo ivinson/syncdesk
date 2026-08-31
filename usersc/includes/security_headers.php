@@ -35,7 +35,7 @@ helps prevent clickjacking by indicating to a browser that it should not render 
 */
 
 $current_script = basename($_SERVER['SCRIPT_NAME'] ?? $_SERVER['PHP_SELF'] ?? '');
-if ($current_script !== 'client_portal.php') {
+if ($current_script !== 'client_portal.php' && $current_script !== 'client_portal_pallazo.php') {
     header("X-Frame-Options: SAMEORIGIN");
 }
 
