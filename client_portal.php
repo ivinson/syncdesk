@@ -2,6 +2,7 @@
 // client_portal.php - Whitelabel Client Support Portal (Public Page)
 require_once 'users/init.php';
 header_remove('X-Frame-Options');
+header("Content-Security-Policy: frame-ancestors *;");
 
 $db = DB::getInstance();
 
