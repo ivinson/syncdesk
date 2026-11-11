@@ -56,7 +56,12 @@ function initNotificationTables() {
             ]);
         }
     }
+
+    // Self-healing: Ensure assigned_to users in tasks table are mapped in task_responsibles
+    $db->query("INSERT IGNORE INTO `task_responsibles` (task_id, user_id) 
+                SELECT id, assigned_to FROM `tasks` WHERE assigned_to IS NOT NULL AND assigned_to > 0");
 }
+
 
 // Get setting value by key
 function getSystemSetting($key, $default = '') {
@@ -248,3 +253,78 @@ function dispatchWhatsAppApiMessage($phone, $var1Name, $var2TaskTitle, $actionDe
         return ['success' => false, 'message' => 'Erro na API WhatsApp (HTTP ' . $httpCode . '): ' . $response, 'response' => $json];
     }
 }
+
+// Checks if a user is a responsible for a specific task (assigned_to OR in task_responsibles)
+function isUserTaskResponsible($taskId, $userId) {
+    if (empty($taskId) || empty($userId)) {
+        return false;
+    }
+    $db = getNotificationDb();
+    
+    // Check assigned_to in tasks table
+    $tCheck = $db->query("SELECT assigned_to FROM tasks WHERE id = ? LIMIT 1", [(int)$taskId]);
+    if ($tCheck->count() > 0 && (int)$tCheck->first()->assigned_to === (int)$userId) {
+        return true;
+    }
+    
+    // Check in task_responsibles table
+    $rCheck = $db->query("SELECT id FROM task_responsibles WHERE task_id = ? AND user_id = ? LIMIT 1", [(int)$taskId, (int)$userId]);
+    return ($rCheck->count() > 0);
+}
+
+// Dispatches status change notifications to all task responsibles and customer contact
+function notifyTaskStatusChange($taskId, $newStatus, $actorUserId, $oldStatus = null) {
+    $db = getNotificationDb();
+    
+    $taskQ = $db->query("SELECT * FROM tasks WHERE id = ? LIMIT 1", [(int)$taskId]);
+    if ($taskQ->count() === 0) {
+        return ['success' => false, 'message' => 'Tarefa não encontrada'];
+    }
+    $task = $taskQ->first();
+    
+    // Friendly status labels
+    $statusMap = [
+        'pending' => 'Pendente',
+        'in_progress' => 'Em andamento',
+        'completed' => 'Concluído'
+    ];
+    $statusLabel = $statusMap[$newStatus] ?? $newStatus;
+    
+    // Gather all responsible user IDs
+    $recipients = [];
+    if (!empty($task->assigned_to)) {
+        $recipients[] = (int)$task->assigned_to;
+        // Ensure assigned_to is present in task_responsibles
+        $db->query("INSERT IGNORE INTO task_responsibles (task_id, user_id) VALUES (?, ?)", [(int)$taskId, (int)$task->assigned_to]);
+    }
+    
+    $respQ = $db->query("SELECT user_id FROM task_responsibles WHERE task_id = ?", [(int)$taskId]);
+    foreach ($respQ->results() as $row) {
+        $recipients[] = (int)$row->user_id;
+    }
+    $recipients = array_values(array_unique(array_filter($recipients)));
+    
+    $results = [];
+    $actionText = "alterou o status para '{$statusLabel}' na tarefa";
+    
+    foreach ($recipients as $targetUserId) {
+        $res = sendWhatsAppNotification($targetUserId, $actorUserId, $task->title, $actionText);
+        $results[] = [
+            'target_user_id' => $targetUserId,
+            'result' => $res
+        ];
+    }
+    
+    // Notify customer contact if present
+    if (!empty($task->customer_contact_id)) {
+        $contactRes = sendContactWhatsAppNotification((int)$task->customer_contact_id, $actorUserId, $task->title, $actionText);
+        $results['contact'] = $contactRes;
+    }
+    
+    return [
+        'success' => true,
+        'status_label' => $statusLabel,
+        'results' => $results
+    ];
+}
+

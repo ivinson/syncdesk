@@ -78,39 +78,27 @@ if (Input::exists()) {
         $action = Input::get('action');
                // 1. QUICK STATUS UPDATE FROM TABLE
         if ($action === 'quick_status_update') {
-            $task_id = Input::get('task_id');
+            $task_id = (int)Input::get('task_id');
             $new_status = Input::get('status');
             
             if (in_array($new_status, ['pending', 'in_progress', 'completed'])) {
                 $task_query = $db->query("SELECT * FROM tasks WHERE id = ?", [$task_id]);
                 if ($task_query->count() > 0) {
                     $task_data = $task_query->first();
-                    $can_update = false;
-                    $is_responsible = ($task_data->assigned_to == $user_id) || ($db->query("SELECT id FROM task_responsibles WHERE task_id = ? AND user_id = ?", [$task_id, $user_id])->count() > 0);
                     
-                    if ($is_admin) {
-                        $can_update = true;
-                    } else if ($is_responsible) {
-                        $can_update = true;
-                    }
+                    // Strict Authorization: ONLY task responsibles can change task status
+                    $is_responsible = function_exists('isUserTaskResponsible') 
+                        ? isUserTaskResponsible($task_id, $user_id) 
+                        : (($task_data->assigned_to == $user_id) || ($db->query("SELECT id FROM task_responsibles WHERE task_id = ? AND user_id = ?", [$task_id, $user_id])->count() > 0));
                     
-                    if ($can_update) {
+                    if ($is_responsible) {
+                        $old_status = $task_data->status;
                         $db->query("UPDATE tasks SET status = ? WHERE id = ?", [$new_status, $task_id]);
                         $status_label = $new_status == 'pending' ? 'Pendente' : ($new_status == 'in_progress' ? 'Em andamento' : 'Concluído');
                         
-                        if (function_exists('sendWhatsAppNotification')) {
-                            // Notify all responsibles except the one doing the update
-                            $resp_users = $db->query("SELECT user_id FROM task_responsibles WHERE task_id = ?", [$task_id])->results();
-                            foreach ($resp_users as $ru) {
-                                $ru_id = (int)$ru->user_id;
-                                if ($ru_id != $user_id) {
-                                    sendWhatsAppNotification($ru_id, $user_id, $task_data->title, "alterou o status para '{$status_label}' na tarefa");
-                                }
-                            }
-                        }
-                        
-                        if (function_exists('sendContactWhatsAppNotification') && !empty($task_data->customer_contact_id)) {
-                            sendContactWhatsAppNotification($task_data->customer_contact_id, $user_id, $task_data->title, "alterou o status para '{$status_label}' na tarefa");
+                        // Notify via WhatsApp
+                        if (function_exists('notifyTaskStatusChange')) {
+                            notifyTaskStatusChange($task_id, $new_status, $user_id, $old_status);
                         }
                         
                         if (Input::get('ajax')) {
@@ -124,15 +112,16 @@ if (Input::exists()) {
                         
                         Redirect::to('tasks.php?success=' . urlencode("Status da tarefa #{$task_id} alterado para '{$status_label}'!"));
                     } else {
+                        $denied_msg = "Acesso negado: Apenas os responsáveis pela tarefa podem alterar o seu status.";
                         if (Input::get('ajax')) {
                             header('Content-Type: application/json');
                             echo json_encode([
                                 'success' => false,
-                                'message' => "Erro: Você não tem permissão para atualizar esta tarefa."
+                                'message' => $denied_msg
                             ]);
                             exit;
                         }
-                        $error_msg = "Erro: Você não tem permissão para atualizar esta tarefa.";
+                        $error_msg = $denied_msg;
                     }
                 } else {
                     if (Input::get('ajax')) {
@@ -263,12 +252,19 @@ if (Input::exists()) {
             if ($task_query->count() > 0) {
                 $task_data = $task_query->first();
                 $can_edit = false;
-                $is_responsible = ($task_data->assigned_to == $user_id) || ($db->query("SELECT id FROM task_responsibles WHERE task_id = ? AND user_id = ?", [$task_id, $user_id])->count() > 0);
+                $is_responsible = function_exists('isUserTaskResponsible') 
+                    ? isUserTaskResponsible($task_id, $user_id) 
+                    : (($task_data->assigned_to == $user_id) || ($db->query("SELECT id FROM task_responsibles WHERE task_id = ? AND user_id = ?", [$task_id, $user_id])->count() > 0));
                 
                 if ($is_admin) {
                     $can_edit = true;
                 } else if ($is_responsible) {
                     $can_edit = true;
+                }
+                
+                // Strict status change restriction: Only responsibles can change status
+                if ($status !== $task_data->status && !$is_responsible) {
+                    $errors[] = "Acesso negado: Apenas os responsáveis pela tarefa podem alterar o seu status.";
                 }
                 
                 if ($can_edit) {
@@ -305,6 +301,8 @@ if (Input::exists()) {
                     if (empty($errors)) {
                         $contact_id = (int)Input::get('customer_contact_id');
                         $contact_id_val = $contact_id > 0 ? $contact_id : null;
+                        $old_status = $task_data->status;
+                        $status_changed = ($old_status !== $status);
 
                         $db->query("UPDATE tasks SET customer_id = ?, assigned_to = ?, title = ?, description = ?, priority = ?, status = ?, deadline = ?, customer_contact_id = ? WHERE id = ?", [
                             $customer_id, $primary_assigned_to, $title, $description, $priority, $status, $deadline_val, $contact_id_val, $task_id
@@ -317,16 +315,20 @@ if (Input::exists()) {
                             }
                         }
 
-                        if (function_exists('sendWhatsAppNotification')) {
-                            $status_label = $status == 'pending' ? 'Pendente' : ($status == 'in_progress' ? 'Em andamento' : 'Concluído');
-                            foreach ($assigned_to_ids as $uid) {
-                                sendWhatsAppNotification($uid, $user_id, $title, "atualizou a tarefa com status '{$status_label}'");
+                        // WhatsApp Notification
+                        if ($status_changed && function_exists('notifyTaskStatusChange')) {
+                            notifyTaskStatusChange($task_id, $status, $user_id, $old_status);
+                        } else {
+                            if (function_exists('sendWhatsAppNotification')) {
+                                $status_label = $status == 'pending' ? 'Pendente' : ($status == 'in_progress' ? 'Em andamento' : 'Concluído');
+                                foreach ($assigned_to_ids as $uid) {
+                                    sendWhatsAppNotification($uid, $user_id, $title, "atualizou os dados da tarefa");
+                                }
                             }
-                        }
 
-                        if (function_exists('sendContactWhatsAppNotification') && $contact_id_val) {
-                            $status_label = $status == 'pending' ? 'Pendente' : ($status == 'in_progress' ? 'Em andamento' : 'Concluído');
-                            sendContactWhatsAppNotification($contact_id_val, $user_id, $title, "atualizou o status para '{$status_label}' na tarefa");
+                            if (function_exists('sendContactWhatsAppNotification') && $contact_id_val) {
+                                sendContactWhatsAppNotification($contact_id_val, $user_id, $title, "atualizou os dados da sua tarefa");
+                            }
                         }
 
                         Redirect::to('tasks.php?success=' . urlencode("Tarefa #{$task_id} atualizada com sucesso!"));
@@ -1569,7 +1571,7 @@ foreach ($tasks as $task) {
                                                 <input type="hidden" name="csrf" value="<?= Token::generate() ?>">
                                                 <input type="hidden" name="action" value="quick_status_update">
                                                 <input type="hidden" name="task_id" value="<?= $task->id ?>">
-                                                <select name="status" class="form-select status-select <?= $status_class ?>" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()" <?= !$can_edit_task ? 'disabled' : '' ?>>
+                                                <select name="status" class="form-select status-select <?= $status_class ?>" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()" <?= !$is_responsible ? 'disabled title="Apenas os responsáveis pela tarefa podem alterar o seu status"' : '' ?>>
                                                     <option value="pending" <?= $task->status == 'pending' ? 'selected' : '' ?>>Pendente</option>
                                                     <option value="in_progress" <?= $task->status == 'in_progress' ? 'selected' : '' ?>>Em andamento</option>
                                                     <option value="completed" <?= $task->status == 'completed' ? 'selected' : '' ?>>Concluído</option>

@@ -145,6 +145,10 @@ if (Input::exists()) {
         $task_id = $db->lastId();
         $protocol_number = "SD-" . str_pad($task_id, 5, '0', STR_PAD_LEFT);
         
+        if (!empty($assigned_to)) {
+            $db->query("INSERT IGNORE INTO task_responsibles (task_id, user_id) VALUES (?, ?)", [$task_id, $assigned_to]);
+        }
+        
         if (function_exists('sendWhatsAppNotification')) {
             sendWhatsAppNotification($assigned_to, 0, "[Portal] " . $service_data->name . ": " . $title, "abriu um novo chamado via Portal de Atendimento");
         }
